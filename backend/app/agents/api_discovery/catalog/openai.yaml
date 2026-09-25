@@ -1,0 +1,17 @@
+provider: OpenAI
+version: v1
+endpoints:
+  - endpoint: "https://api.openai.com/v1/chat/completions"
+    operation_id: "openai.chat.completions"
+    http_method: "POST"
+    summary: "Generate text completion or chat response using OpenAI models."
+    description: "Calls OpenAI Chat Completion endpoint with messages array."
+    auth_type: "Bearer"
+    oauth_scopes: []
+    required_params: ["model", "messages"]
+    optional_params: ["temperature", "max_tokens"]
+    rate_limits: "3500/min"
+    latency_ms: 350.0
+    availability: 99.90
+    popularity_score: 0.99
+    health_score: 0.99

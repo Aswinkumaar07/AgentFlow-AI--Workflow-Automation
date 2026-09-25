@@ -1,0 +1,17 @@
+provider: Discord
+version: v10
+endpoints:
+  - endpoint: "https://discord.com/api/v10/channels/{channel_id}/messages"
+    operation_id: "discord.messages.create"
+    http_method: "POST"
+    summary: "Send message or webhook alert to Discord channel."
+    description: "Posts text message or embed object into Discord text channel."
+    auth_type: "BotToken"
+    oauth_scopes: ["bot"]
+    required_params: ["channel_id", "content"]
+    optional_params: ["embeds"]
+    rate_limits: "5/sec"
+    latency_ms: 70.0
+    availability: 99.95
+    popularity_score: 0.92
+    health_score: 0.99

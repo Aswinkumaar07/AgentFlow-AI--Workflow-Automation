@@ -1,0 +1,17 @@
+provider: Google Drive
+version: v3
+endpoints:
+  - endpoint: "https://www.googleapis.com/upload/drive/v3/files"
+    operation_id: "drive.files.create"
+    http_method: "POST"
+    summary: "Upload invoice or document file to Google Drive."
+    description: "Uploads file binary content and creates file metadata in Google Drive storage."
+    auth_type: "OAuth2"
+    oauth_scopes: ["https://www.googleapis.com/auth/drive.file"]
+    required_params: ["uploadType"]
+    optional_params: ["folderId"]
+    rate_limits: "1000/min"
+    latency_ms: 140.0
+    availability: 99.98
+    popularity_score: 0.96
+    health_score: 1.0

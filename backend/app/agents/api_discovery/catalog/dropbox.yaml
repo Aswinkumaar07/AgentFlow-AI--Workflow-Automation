@@ -1,0 +1,17 @@
+provider: Dropbox
+version: v2
+endpoints:
+  - endpoint: "https://content.dropboxapi.com/2/files/upload"
+    operation_id: "dropbox.files.upload"
+    http_method: "POST"
+    summary: "Upload document file to Dropbox cloud storage."
+    description: "Uploads binary file payload to specified path in Dropbox storage."
+    auth_type: "Bearer"
+    oauth_scopes: ["files.content.write"]
+    required_params: ["Dropbox-API-Arg"]
+    optional_params: ["autorename", "mute"]
+    rate_limits: "120/min"
+    latency_ms: 150.0
+    availability: 99.92
+    popularity_score: 0.88
+    health_score: 0.98

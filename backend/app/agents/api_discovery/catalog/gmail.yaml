@@ -1,0 +1,32 @@
+provider: Gmail
+version: v1
+endpoints:
+  - endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+    operation_id: "gmail.messages.list"
+    http_method: "GET"
+    summary: "List or search messages in Gmail inbox."
+    description: "Fetches list of email messages matching search query or invoice parameters."
+    auth_type: "OAuth2"
+    oauth_scopes: ["https://www.googleapis.com/auth/gmail.readonly"]
+    required_params: ["q"]
+    optional_params: ["maxResults", "pageToken"]
+    rate_limits: "250/sec"
+    latency_ms: 85.0
+    availability: 99.99
+    popularity_score: 0.98
+    health_score: 1.0
+
+  - endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}/attachments/{attachmentId}"
+    operation_id: "gmail.attachments.get"
+    http_method: "GET"
+    summary: "Download message attachment file."
+    description: "Downloads message attachment payload from specified Gmail message ID."
+    auth_type: "OAuth2"
+    oauth_scopes: ["https://www.googleapis.com/auth/gmail.readonly"]
+    required_params: ["id", "attachmentId"]
+    optional_params: []
+    rate_limits: "250/sec"
+    latency_ms: 110.0
+    availability: 99.95
+    popularity_score: 0.95
+    health_score: 0.99

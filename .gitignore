@@ -1,0 +1,57 @@
+# Environment and Secrets
+.env
+.env.*
+*.env
+backend/.env
+backend/.env.*
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+ENV/
+env/
+backend/.venv/
+
+# Build and Output
+dist/
+dist-ssr/
+build/
+*.egg-info/
+attachments_output/
+storage/
+scratch/
+scratch_*.py
+
+# Database and SQLite
+*.db
+*.sqlite
+*.sqlite3
+backend/*.db
+
+# Python & Pytest Caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+backend/.pytest_cache/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor & OS files
+.vscode/
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

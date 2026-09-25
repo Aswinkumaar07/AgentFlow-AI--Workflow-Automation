@@ -1,0 +1,17 @@
+provider: HubSpot
+version: v3
+endpoints:
+  - endpoint: "https://api.hubapi.com/crm/v3/objects/contacts"
+    operation_id: "hubspot.contacts.create"
+    http_method: "POST"
+    summary: "Create CRM lead or contact in HubSpot."
+    description: "Creates new contact object with email, name, and properties in HubSpot CRM."
+    auth_type: "Bearer"
+    oauth_scopes: ["crm.objects.contacts.write"]
+    required_params: ["properties"]
+    optional_params: []
+    rate_limits: "150/10sec"
+    latency_ms: 130.0
+    availability: 99.95
+    popularity_score: 0.89
+    health_score: 0.98

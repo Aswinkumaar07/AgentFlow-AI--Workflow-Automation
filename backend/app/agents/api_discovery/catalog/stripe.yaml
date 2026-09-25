@@ -1,0 +1,17 @@
+provider: Stripe
+version: "2023-10-16"
+endpoints:
+  - endpoint: "https://api.stripe.com/v1/charges"
+    operation_id: "stripe.charges.create"
+    http_method: "POST"
+    summary: "Create payment charge or process invoice in Stripe."
+    description: "Creates payment charge object in Stripe merchant account."
+    auth_type: "Bearer"
+    oauth_scopes: ["charges:write"]
+    required_params: ["amount", "currency", "source"]
+    optional_params: ["description", "customer"]
+    rate_limits: "100/sec"
+    latency_ms: 75.0
+    availability: 99.999
+    popularity_score: 0.97
+    health_score: 1.0

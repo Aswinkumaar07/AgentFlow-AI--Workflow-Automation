@@ -1,0 +1,150 @@
+/* ─── Hero Ambient & Particle Animations ─────────────────────────── */
+@keyframes aurora-1 {
+  0%, 100% { transform: translate(0%, 0%) scale(1); opacity: 0.6; }
+  33% { transform: translate(4%, -5%) scale(1.1); opacity: 0.85; }
+  66% { transform: translate(-3%, 3%) scale(0.95); opacity: 0.5; }
+}
+@keyframes aurora-2 {
+  0%, 100% { transform: translate(0%, 0%) scale(1); opacity: 0.5; }
+  33% { transform: translate(-5%, 4%) scale(1.08); opacity: 0.8; }
+  66% { transform: translate(4%, -3%) scale(0.92); opacity: 0.45; }
+}
+@keyframes aurora-3 {
+  0%, 100% { transform: translate(0%, 0%) scale(1); opacity: 0.4; }
+  50% { transform: translate(3%, -6%) scale(1.15); opacity: 0.7; }
+}
+
+@keyframes float-particle {
+  0%, 100% { transform: translateY(0px) translateX(0px); opacity: 0.3; }
+  25% { transform: translateY(-16px) translateX(6px); opacity: 0.85; }
+  50% { transform: translateY(-8px) translateX(-4px); opacity: 0.5; }
+  75% { transform: translateY(-22px) translateX(8px); opacity: 0.95; }
+}
+
+@keyframes live-ping {
+  0%    { transform: scale(1); opacity: 1; }
+  75%, 100% { transform: scale(2.8); opacity: 0; }
+}
+
+@keyframes slide-in-feed {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.aurora-orb-1 { animation: aurora-1 14s ease-in-out infinite; }
+.aurora-orb-2 { animation: aurora-2 18s ease-in-out infinite; }
+.aurora-orb-3 { animation: aurora-3 22s ease-in-out infinite; }
+.float-particle { animation: float-particle var(--dur, 6s) ease-in-out infinite var(--delay, 0s); }
+.live-ping-ring { animation: live-ping 1.5s ease-out infinite; }
+.feed-item-enter { animation: slide-in-feed 0.4s ease-out forwards; }
+
+/* ─── Premium AI Effects ───────────────────────────────────────────── */
+
+/* 1. Cursor Spotlight Glow */
+.spotlight-card {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0.2, 1), box-shadow 0.3s ease;
+  transform-style: preserve-3d;
+  perspective: 1000px;
+}
+
+.spotlight-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    500px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(255, 109, 0, 0.18),
+    transparent 60%
+  );
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: 2;
+}
+.spotlight-card:hover::before {
+  opacity: 1;
+}
+
+/* 2. Border Beam / Traveling Light Effect */
+@keyframes border-beam-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.border-beam-container {
+  position: relative;
+  border-radius: inherit;
+}
+
+.border-beam {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    transparent 0deg,
+    transparent 280deg,
+    #FF6D00 320deg,
+    #FF0C00 340deg,
+    #FF9E43 360deg
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: border-beam-spin 4s linear infinite;
+  z-index: 3;
+}
+
+/* 4. Shimmering Light Sweep Badges */
+@keyframes shimmer-sweep-anim {
+  0% { transform: translateX(-150%) rotate(25deg); }
+  100% { transform: translateX(250%) rotate(25deg); }
+}
+
+.shimmer-badge {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer-badge::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 50%;
+  height: 200%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.4),
+    transparent
+  );
+  transform: rotate(25deg);
+  animation: shimmer-sweep-anim 3.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* 5. Animated Pulse Waves on Workflow Edges */
+@keyframes edge-pulse-flow {
+  0% { stroke-dashoffset: 40; }
+  100% { stroke-dashoffset: 0; }
+}
+
+.pulse-edge-path {
+  stroke-dasharray: 8, 6;
+  animation: edge-pulse-flow 1.2s linear infinite;
+}
+
+/* Node active execution glow ring */
+@keyframes node-exec-ring {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.18); opacity: 1; filter: drop-shadow(0 0 12px #22C55E); }
+}
+
+.active-exec-node {
+  animation: node-exec-ring 1.2s ease-in-out infinite;
+}

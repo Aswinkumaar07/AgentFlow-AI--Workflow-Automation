@@ -1,0 +1,17 @@
+provider: Generic REST API
+version: v1
+endpoints:
+  - endpoint: "https://api.example.com/v1/webhooks"
+    operation_id: "generic.webhook.send"
+    http_method: "POST"
+    summary: "Dispatch HTTP POST JSON webhook payload to custom REST endpoint."
+    description: "Sends HTTP POST request with arbitrary JSON body to configured URL."
+    auth_type: "API_Key"
+    oauth_scopes: []
+    required_params: ["url", "payload"]
+    optional_params: ["headers"]
+    rate_limits: "unlimited"
+    latency_ms: 50.0
+    availability: 99.99
+    popularity_score: 0.80
+    health_score: 1.0

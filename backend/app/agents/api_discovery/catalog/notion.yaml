@@ -1,0 +1,17 @@
+provider: Notion
+version: "2022-06-28"
+endpoints:
+  - endpoint: "https://api.notion.com/v1/pages"
+    operation_id: "notion.pages.create"
+    http_method: "POST"
+    summary: "Create page or database entry in Notion workspace."
+    description: "Creates page object inside specified parent database in Notion workspace."
+    auth_type: "Bearer"
+    oauth_scopes: ["page:write"]
+    required_params: ["parent", "properties"]
+    optional_params: ["children", "icon", "cover"]
+    rate_limits: "3/sec"
+    latency_ms: 180.0
+    availability: 99.90
+    popularity_score: 0.90
+    health_score: 0.97

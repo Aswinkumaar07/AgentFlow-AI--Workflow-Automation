@@ -1,0 +1,17 @@
+provider: Slack
+version: v1
+endpoints:
+  - endpoint: "https://slack.com/api/chat.postMessage"
+    operation_id: "slack.chat.postMessage"
+    http_method: "POST"
+    summary: "Post alert notification or chat message to Slack channel."
+    description: "Sends formatted text or block payload message to specified Slack channel."
+    auth_type: "Bearer"
+    oauth_scopes: ["chat:write"]
+    required_params: ["channel", "text"]
+    optional_params: ["blocks", "thread_ts"]
+    rate_limits: "1/sec"
+    latency_ms: 60.0
+    availability: 99.99
+    popularity_score: 0.99
+    health_score: 1.0

@@ -1,0 +1,161 @@
+/* ─── Google Fonts ─────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@import "tailwindcss";
+
+/* ─── AgentFlow AI Visual Identity Theme Tokens ───────────────────────────── */
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Outfit', 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Brand Palette - AgentFlow Orange Identity */
+  --color-primary:       #FF6D00;
+  --color-primary-hover: #FF0C00;
+  --color-secondary:     #FF802C;
+  --color-accent:        #FF6D00;
+  --color-success:       #22C55E;
+  --color-danger:        #EF4444;
+  --color-warning:       #F59E0B;
+  --color-info:          #06B6D4;
+  --color-ai:            #A855F7;
+}
+
+/* ─── Dark Mode (Default Identity) ────────────────────────────────────────── */
+:root, .dark {
+  color-scheme: dark;
+
+  /* AgentFlow Palette Custom Properties */
+  --af-bg-primary:         #0E0918;
+  --af-bg-secondary:       #13102A;
+  --af-bg-card:            #1B1728;
+  --af-bg-card-hover:      #231E3A;
+  --af-orange:             #FF6D00;
+  --af-orange-red:         #FF0C00;
+  --af-orange-glow:        rgba(255, 109, 0, 0.20);
+  --af-orange-glow-strong: rgba(255, 109, 0, 0.42);
+  --af-glass:              rgba(27, 23, 40, 0.72);
+  --af-border:             rgba(255, 255, 255, 0.12);
+  --af-border-hover:       rgba(255, 109, 0, 0.20);
+  --af-text-primary:       #FFFFFF;
+  --af-text-secondary:     rgba(255, 255, 255, 0.70);
+  --af-text-muted:         rgba(255, 255, 255, 0.45);
+  --af-success:            #22C55E;
+  --af-warning:            #F59E0B;
+  --af-error:              #EF4444;
+  --af-info:               #06B6D4;
+  --af-ai:                 #A855F7;
+
+  /* Alias Compatibility Mapping */
+  --bg:           #0E0918;
+  --surface:      #13102A;
+  --card:         #1B1728;
+  --card-hover:   #231E3A;
+  --sidebar:      rgba(27, 23, 40, 0.72);
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-accent: rgba(255, 109, 0, 0.15);
+  --sidebar-accent-foreground: #FF6D00;
+
+  --border:       rgba(255, 255, 255, 0.12);
+  --border-glass: rgba(255, 255, 255, 0.12);
+  --border-hover: rgba(255, 109, 0, 0.20);
+
+  --text:         #FFFFFF;
+  --text-2:       rgba(255, 255, 255, 0.90);
+  --text-3:       rgba(255, 255, 255, 0.70);
+  --text-4:       rgba(255, 255, 255, 0.45);
+  --text-5:       rgba(255, 255, 255, 0.35);
+  --text-6:       rgba(255, 255, 255, 0.25);
+  --muted-foreground: rgba(255, 255, 255, 0.45);
+
+  --glass-bg:     rgba(27, 23, 40, 0.72);
+  --glass-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), inset 0 1px 1px 0 rgba(255, 255, 255, 0.12);
+
+  background-color: var(--af-bg-primary);
+  color: var(--af-text-primary);
+}
+
+.light {
+  color-scheme: dark;
+  background-color: var(--af-bg-primary);
+  color: var(--af-text-primary);
+}
+
+/* ─── Global Reset & Scrollbar ─────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background-color: var(--af-bg-primary);
+  color: var(--af-text-primary);
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 109, 0, 0.25); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 109, 0, 0.55); }
+
+/* ─── Glass Utilities ──────────────────────────────────────────────────────── */
+.glass-panel {
+  background: var(--af-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--af-border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.36);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-panel:hover {
+  border-color: var(--af-border-hover);
+  box-shadow: 0 12px 36px rgba(255, 109, 0, 0.12), var(--glass-shadow);
+}
+
+.glass-row-pill {
+  background: var(--af-bg-card);
+  border: 1px solid var(--af-border);
+  backdrop-filter: blur(12px);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.glass-row-pill:hover {
+  background: var(--af-bg-card-hover);
+  border-color: var(--af-border-hover);
+  box-shadow: 0 4px 20px rgba(255, 109, 0, 0.10);
+}
+
+/* Brand Gradient Text */
+.gradient-text-electric,
+.gradient-text-bloom,
+.gradient-text-brand {
+  background: linear-gradient(135deg, #FF6D00 0%, #FF0C00 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Fading Glow Divider */
+.glow-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 109, 0, 0.35) 50%, transparent 100%);
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+:focus-visible {
+  outline: 2px solid #FF6D00;
+  outline-offset: 2px;
+  border-radius: 8px;
+}

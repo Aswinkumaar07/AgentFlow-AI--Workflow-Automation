@@ -1,0 +1,17 @@
+provider: GitHub
+version: v3
+endpoints:
+  - endpoint: "https://api.github.com/repos/{owner}/{repo}/issues"
+    operation_id: "github.issues.create"
+    http_method: "POST"
+    summary: "Create issue ticket in GitHub repository."
+    description: "Creates a new issue in specified GitHub owner and repository."
+    auth_type: "Bearer"
+    oauth_scopes: ["repo"]
+    required_params: ["owner", "repo", "title"]
+    optional_params: ["body", "labels", "assignees"]
+    rate_limits: "5000/hour"
+    latency_ms: 95.0
+    availability: 99.95
+    popularity_score: 0.94
+    health_score: 0.99
