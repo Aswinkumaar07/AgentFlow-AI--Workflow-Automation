@@ -134,7 +134,6 @@ export const aiApi = {
       services: ['Gmail'],
       workflow_id: fallbackId,
       workflow_json: {
-        workflow_id: fallbackId,
         title: prompt,
         nodes,
         edges,

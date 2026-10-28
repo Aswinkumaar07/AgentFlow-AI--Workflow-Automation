@@ -16,7 +16,7 @@ import { useExecutionStore } from '../store/useExecutionStore';
 import { useOAuthStore } from '../store/useOAuthStore';
 import { workflowApi } from '../api/workflows';
 import { getAutoLayoutElements } from '../utils/layout';
-import { isInternalProvider, checkProviderReadiness, checkNodeReadiness, rebindNodesWithOAuthConnections } from '../utils/oauthReadiness';
+import { checkNodeReadiness, rebindNodesWithOAuthConnections } from '../utils/oauthReadiness';
 import { restoreWorkflowOAuthSnapshot } from '../utils/oauthWorkflowPersistence';
 import {
   Play,

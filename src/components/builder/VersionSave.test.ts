@@ -178,7 +178,6 @@ export async function runVersionSaveTests() {
 
   // Test 7: Verify scoped targetWorkflowId parameter is accepted and respected
   useWorkflowStore.setState({ nodes: sampleNodes, edges: sampleEdges, workflowId: 'wf_active_default' });
-  let targetWorkflowIdUsed = '';
   // Test scoped saveVersion call argument signature with targetWorkflowId
   try {
     // Calling with explicit targetWorkflowId 'wf_custom_target'
@@ -579,6 +578,6 @@ export async function runVersionSaveTests() {
 // Allow direct execution via tsx / node
 runVersionSaveTests().catch((e) => {
   console.error(e);
-  process.exit(1);
+  (globalThis as any).process?.exit?.(1);
 });
 

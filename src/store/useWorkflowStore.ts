@@ -700,7 +700,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           return;
         }
 
-        const rawNodes = data.definition?.nodes || data.nodes || data.definition?.steps || data.steps || [];
+        const rawNodes = data.definition?.nodes || (data as any).nodes || data.definition?.steps || (data as any).steps || [];
         if (rawNodes.length === 0 && currentNodes.length > 0 && (currentWfId === id || currentDbWfId === id)) {
           console.warn(`[Hydration Guard] Ignoring empty response for "${id}"; canvas already has ${currentNodes.length} nodes.`);
           return;
