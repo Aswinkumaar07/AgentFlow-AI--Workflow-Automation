@@ -1,15 +1,22 @@
-if (typeof globalThis.localStorage === 'undefined') {
-  (globalThis as any).localStorage = {
-    getItem: () => null,
-    setItem: () => {},
-    removeItem: () => {},
-    clear: () => {},
-  };
+const mockStorage = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+  clear: () => {},
+};
+try {
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: mockStorage,
+    writable: true,
+    configurable: true,
+  });
+} catch {
+  (globalThis as any).localStorage = mockStorage;
 }
 
-import { extractSlackResultDetails } from '../../utils/slackNormalizer.js';
-import { extractGmailMessageDetails, extractMultipleGmailMessageDetails } from '../../utils/gmailNormalizer.js';
-import { resolveApprovalTargetDetails } from './ExecutionResultInspector.js';
+const { extractSlackResultDetails } = await import('../../utils/slackNormalizer.js');
+const { extractGmailMessageDetails, extractMultipleGmailMessageDetails } = await import('../../utils/gmailNormalizer.js');
+const { resolveApprovalTargetDetails } = await import('./ExecutionResultInspector.js');
 
 /**
  * Frontend Regression Test Suite for ExecutionResultInspector Slack Normalization
@@ -244,6 +251,85 @@ export function runExecutionResultInspectorTests() {
   assert(gmailGetRes.sender === 'notifications-noreply@linkedin.com', 'Test C: Sender extracted from headers');
   assert(gmailGetRes.subject === 'Deepika M posted...', 'Test C: Subject extracted from headers');
   assert(gmailGetRes.isDetailed === true, 'Test C: Detailed email correctly marked as detailed');
+
+  // Test D: gmail.messages.send execution payload -> extracts recipient, subject, content
+  const gmailSendLivePayload = {
+    node_id: "step_3",
+    operation: "gmail.messages.send",
+    status: "COMPLETED",
+    output: {
+      status_code: 200,
+      request: {
+        url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        method: "POST",
+        payload: {
+          to: "user@example.com",
+          subject: "Project Update",
+          body: "Hello, here is the latest project update for the team."
+        }
+      },
+      response: {
+        id: "1910a3b2c1d0e4f5",
+        threadId: "1910a3b2c1d0e4f5"
+      },
+      body: {
+        id: "1910a3b2c1d0e4f5",
+        threadId: "1910a3b2c1d0e4f5"
+      }
+    }
+  };
+  const gmailSendRes = extractGmailMessageDetails(gmailSendLivePayload);
+  assert(gmailSendRes.recipient === 'user@example.com', 'Test D: Recipient extracted from request.payload.to');
+  assert(gmailSendRes.sender === 'user@example.com', 'Test D: Sender populated with recipient for backwards compatibility');
+  assert(gmailSendRes.subject === 'Project Update', 'Test D: Subject extracted from request.payload.subject');
+  assert(gmailSendRes.content === 'Hello, here is the latest project update for the team.', 'Test D: Content extracted from request.payload.body');
+  assert(gmailSendRes.messageId === '1910a3b2c1d0e4f5', 'Test D: Sent message ID preserved');
+  assert(gmailSendRes.threadId === '1910a3b2c1d0e4f5', 'Test D: Sent thread ID preserved');
+  assert(gmailSendRes.isDetailed === true, 'Test D: Sent message marked as detailed');
+
+  // Test E: gmail.messages.send with parameters fallback
+  const gmailSendParamsPayload = {
+    node_id: "step_4",
+    operation: "gmail.messages.send",
+    status: "COMPLETED",
+    parameters: {
+      to: "team@company.org",
+      subject: "Weekly Sync",
+      body: "Meeting notes attached."
+    },
+    output: {
+      status_code: 200,
+      response: {
+        id: "msg_param_789"
+      }
+    }
+  };
+  const gmailSendParamsRes = extractGmailMessageDetails(gmailSendParamsPayload);
+  assert(gmailSendParamsRes.recipient === 'team@company.org', 'Test E: Recipient extracted from parameters.to');
+  assert(gmailSendParamsRes.subject === 'Weekly Sync', 'Test E: Subject extracted from parameters.subject');
+  assert(gmailSendParamsRes.content === 'Meeting notes attached.', 'Test E: Content extracted from parameters.body');
+  assert(gmailSendParamsRes.isDetailed === true, 'Test E: Detailed flag true for parameters fallback');
+
+  // Test F: gmail.messages.send with multiple recipients array
+  const gmailSendArrayPayload = {
+    node_id: "step_5",
+    operation: "gmail.messages.send",
+    status: "COMPLETED",
+    output: {
+      request: {
+        payload: {
+          to: ["dev1@agentflow.ai", "dev2@agentflow.ai"],
+          subject: "Release Notes",
+          body: "v2 is live!"
+        }
+      },
+      response: { id: "msg_multi_to" }
+    }
+  };
+  const gmailSendArrayRes = extractGmailMessageDetails(gmailSendArrayPayload);
+  assert(gmailSendArrayRes.recipient === 'dev1@agentflow.ai, dev2@agentflow.ai', 'Test F: Multiple recipients joined');
+  assert(gmailSendArrayRes.subject === 'Release Notes', 'Test F: Subject matches');
+  assert(gmailSendArrayRes.content === 'v2 is live!', 'Test F: Content matches');
 
   // --- AI Summary Extraction Tests (A, B, C, D, E) ---
 

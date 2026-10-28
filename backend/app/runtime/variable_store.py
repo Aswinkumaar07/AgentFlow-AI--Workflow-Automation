@@ -57,9 +57,18 @@ class VariableStore:
             if isinstance(current, dict):
                 if part in current:
                     current = current[part]
+                elif part == "data" and "body" in current:
+                    current = current["body"]
+                elif part == "body" and "data" in current:
+                    current = current["data"]
                 else:
                     unwrapped = current
-                    while isinstance(unwrapped, dict) and part not in unwrapped:
+                    while (
+                        isinstance(unwrapped, dict)
+                        and part not in unwrapped
+                        and not (part == "data" and "body" in unwrapped)
+                        and not (part == "body" and "data" in unwrapped)
+                    ):
                         sub = unwrapped.get("output") or unwrapped.get("body") or unwrapped.get("response") or unwrapped.get("data")
                         if isinstance(sub, dict):
                             unwrapped = sub
@@ -67,6 +76,10 @@ class VariableStore:
                             break
                     if isinstance(unwrapped, dict) and part in unwrapped:
                         current = unwrapped[part]
+                    elif isinstance(unwrapped, dict) and part == "data" and "body" in unwrapped:
+                        current = unwrapped["body"]
+                    elif isinstance(unwrapped, dict) and part == "body" and "data" in unwrapped:
+                        current = unwrapped["data"]
                     else:
                         return None
             elif isinstance(current, list):

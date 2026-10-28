@@ -90,7 +90,7 @@ def build_gmail_search_query(prompt: str, entities: Optional[Dict[str, Any]] = N
 
     from app.services.workflow_scheduler import workflow_scheduler_service
     clean_prompt = workflow_scheduler_service.extract_workflow_intent_prompt(prompt)
-    clean_prompt = re.sub(r"(?i)\s*,?\s*(?:and\s+)?(?:summarize|summary|post|send|notify|upload|save|write|slack|drive)\b.*$", "", clean_prompt).strip(" .,;")
+    clean_prompt = re.sub(r"(?i)\s*(?:,\s*|\s+and\s+|\s+then\s+)(?:summarize|summary|post|send|notify|upload|save|write|slack|drive)\b.*$", "", clean_prompt).strip(" .,;")
 
     num_pat = r"(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|fifty|hundred)"
     count_clause_patterns = [
@@ -166,7 +166,7 @@ def build_gmail_search_query(prompt: str, entities: Optional[Dict[str, Any]] = N
     if ent_unread is True or "is:unread" in p_lower or "unread" in p_lower:
         if "is:unread" not in " ".join(tokens):
             tokens.append("is:unread")
-    elif "is:read" in p_lower or "find read emails" in p_lower or "show read emails" in p_lower or "read emails" in p_lower:
+    elif "is:read" in p_lower or "find read emails" in p_lower or "show read emails" in p_lower or "already read emails" in p_lower:
         if "is:read" not in " ".join(tokens):
             tokens.append("is:read")
 
@@ -181,19 +181,20 @@ def build_gmail_search_query(prompt: str, entities: Optional[Dict[str, Any]] = N
     # 6. Subject / Keyword parsing
     subject_val = ent_subject
     if not subject_val:
-        subj_match = re.search(r"(?:subject|about|regarding|titled)\s+([a-zA-Z0-9_-]+)", prompt, re.IGNORECASE)
+        subj_match = re.search(r"(?:subject|about|regarding|titled|keyword|containing)\s+(?:[\"']([^\"']+)[\"']|([a-zA-Z0-9_-]+))", prompt, re.IGNORECASE)
         if subj_match:
-            candidate = subj_match.group(1).strip()
-            if candidate.lower() not in ["email", "emails", "gmail", "inbox", "message", "messages", "a", "an", "the"]:
+            candidate = (subj_match.group(1) or subj_match.group(2) or "").strip()
+            stop_words = {
+                "email", "emails", "gmail", "inbox", "message", "messages", "a", "an", "the",
+                "my", "our", "all", "them", "it", "new", "recent", "latest", "today", "yesterday"
+            }
+            if candidate.lower() not in stop_words:
                 subject_val = candidate
 
     if subject_val:
         tokens.append(f"subject:{subject_val}")
-    elif "invoice" in p_lower and "subject:invoice" not in " ".join(tokens):
-        if "invoice" not in p_lower.replace("subject:invoice", ""):
-            tokens.append("invoice")
-        else:
-            tokens.append("invoice")
+    elif any(w in p_lower for w in ["invoice", "invoices"]) and "subject:invoice" not in " ".join(tokens):
+        tokens.append("invoice")
 
     # 7. Date filtering ("today", "yesterday", "this week")
     if "today" in p_lower:
@@ -217,26 +218,10 @@ def build_gmail_search_query(prompt: str, entities: Optional[Dict[str, Any]] = N
     orig_lower = prompt.lower().strip()
     is_conditional_prompt = any(w in orig_lower for w in ["check whether", "check if", "if contains", "if email contains"]) or orig_lower.startswith("if ") or " if " in orig_lower
 
-    # Fallback if no specific token matched
-    if not final_q:
-        if is_conditional_prompt:
-            final_q = ""
-        else:
-            clean_text = re.sub(
-                r"(?i)^(find|search|show|get|list|display|look for|read|reply|send)\s+(my\s+)?(unread\s+)?(\d+\s+)?(most\s+recent\s+|latest\s+|newest\s+)?(gmail\s+)?(emails?|messages?|mail)\s*(from|about|with|for)?\s*",
-                "",
-                clean_prompt or prompt
-            ).strip()
-            clean_text = re.sub(r"(?i)\.\s*do not.*$", "", clean_text).strip()
-            clean_text = re.sub(r"(?i)do not.*$", "", clean_text).strip()
-            clean_text = re.sub(r"(?i)(politely|latest\s+(?:gmail\s+)?emails?|latest\s+(?:gmail\s+)?messages?|most\s+recent\s+(?:gmail\s+)?emails?|newest\s+(?:gmail\s+)?emails?)", "", clean_text).strip()
-
-            clean_text = clean_text.strip(" .,;:")
-            noise_phrases = ["reply politely", "latest email", "latest gmail email", "most recent email", "most recent gmail email", "newest email", "newest gmail email", "read emails", "get emails", "show emails", "fetch emails"]
-            if clean_text and not any(p in clean_text.lower() for p in noise_phrases):
-                final_q = clean_text
-            else:
-                final_q = ""
+    # Never return raw conversational instructions as search queries.
+    # If no genuine search filter or topic is specified, return an empty query.
+    if not final_q or is_conditional_prompt:
+        final_q = ""
 
     logger.info(f"[AI-17][SEARCH_QUERY] q='{final_q}'")
     return final_q

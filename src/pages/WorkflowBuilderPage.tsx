@@ -16,7 +16,7 @@ import { useExecutionStore } from '../store/useExecutionStore';
 import { useOAuthStore } from '../store/useOAuthStore';
 import { workflowApi } from '../api/workflows';
 import { getAutoLayoutElements } from '../utils/layout';
-import { isInternalProvider, checkProviderReadiness, rebindNodesWithOAuthConnections } from '../utils/oauthReadiness';
+import { isInternalProvider, checkProviderReadiness, checkNodeReadiness, rebindNodesWithOAuthConnections } from '../utils/oauthReadiness';
 import { restoreWorkflowOAuthSnapshot } from '../utils/oauthWorkflowPersistence';
 import {
   Play,
@@ -43,7 +43,7 @@ import {
 } from 'lucide-react';
 
 export const WorkflowBuilderPage: React.FC = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const urlWorkflowId = searchParams.get('id');
 
   const {
@@ -91,6 +91,20 @@ export const WorkflowBuilderPage: React.FC = () => {
 
   const selectedNodeIds = nodes.filter((n) => n.selected).map((n) => n.id);
 
+  // Keep builder URL synchronized with the active workflowId for seamless refresh and sharing
+  React.useEffect(() => {
+    if (!workflowId) return;
+    // Prevent unhydrated default store state from clobbering incoming URL workflow ID on mount
+    if (urlWorkflowId && urlWorkflowId !== workflowId) {
+      if (workflowId === 'wf_studio_1' && urlWorkflowId !== 'wf_studio_1') {
+        return;
+      }
+    }
+    if (urlWorkflowId !== workflowId) {
+      setSearchParams({ id: workflowId }, { replace: true });
+    }
+  }, [workflowId, urlWorkflowId, setSearchParams]);
+
   // Synchronize restored workflow nodes with real OAuth connections once connection data resolves
   React.useEffect(() => {
     if (nodes && nodes.length > 0) {
@@ -108,8 +122,9 @@ export const WorkflowBuilderPage: React.FC = () => {
 
     // Hydrate workflow from backend if urlWorkflowId is present and not matching loaded store state
     if (urlWorkflowId) {
-      const { workflowId: currentWfId, nodes: currentNodes, loadWorkflowFromBackend } = useWorkflowStore.getState();
-      if (currentWfId !== urlWorkflowId || currentNodes.length === 0) {
+      const { workflowId: currentWfId, databaseWorkflowId: currentDbWfId, nodes: currentNodes, loadWorkflowFromBackend } = useWorkflowStore.getState();
+      const isAlreadyLoaded = (currentWfId === urlWorkflowId || currentDbWfId === urlWorkflowId) && currentNodes.length > 0;
+      if (!isAlreadyLoaded) {
         loadWorkflowFromBackend(urlWorkflowId);
       }
     }
@@ -209,9 +224,8 @@ export const WorkflowBuilderPage: React.FC = () => {
     };
 
     // Preflight connection check before starting execution
-    const reqProvs = Array.from(new Set(mappedNodes.map((n) => n.provider))).filter((p) => p && !isInternalProvider(p));
     const connections = useOAuthStore.getState().connections;
-    const readiness = checkProviderReadiness(reqProvs, connections);
+    const readiness = checkNodeReadiness(nodes, connections);
 
     if (!readiness.ready) {
       const missingStr = readiness.missing_connections.join(', ');
@@ -612,6 +626,7 @@ export const WorkflowBuilderPage: React.FC = () => {
       <VersionHistoryModal
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
+        workflowId={workflowId}
         currentNodes={nodes}
         currentEdges={edges}
       />

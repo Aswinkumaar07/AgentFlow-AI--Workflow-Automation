@@ -27,6 +27,7 @@ import { useWorkflowStore } from '../../store/useWorkflowStore';
 interface CustomNodeData extends Record<string, unknown> {
   label: string;
   provider: string;
+  provider_name?: string;
   operation_id: string;
   parameters: Record<string, any>;
   step_id: string;
@@ -151,7 +152,7 @@ export const CustomNode: React.FC<NodeProps> = memo(({ data, selected, id }) => 
                 {nodeData.label || nodeData.provider}
               </span>
             )}
-            <span className="text-[9px] text-[#A098AE] truncate max-w-[130px]">{nodeData.provider}</span>
+            <span className="text-[9px] text-[#A098AE] truncate max-w-[130px]">{nodeData.provider_name || nodeData.provider}</span>
           </div>
         </div>
         <span className="px-2 py-0.5 rounded-full text-[9px] font-mono bg-[#1B1728] text-[#FF6D00] border border-[rgba(255,255,255,0.08)] uppercase shrink-0 font-bold">

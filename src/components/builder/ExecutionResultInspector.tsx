@@ -429,10 +429,20 @@ const ExecutionResultInspectorInner: React.FC<ExecutionResultInspectorProps> = (
   const isExhaustedRetries = currentStep?.exhausted_retries || (!currentStepSuccess && currentAttempts >= currentMaxAttempts && currentStep?.retryable);
   const isRetryableError = currentStep?.retryable || false;
 
+  // Extract Gmail details for current step or execution result
+  const singleEmail = extractGmailMessageDetails(currentStep || executionResult);
+  const multiResult = extractMultipleGmailMessageDetails(currentStep || executionResult);
+  const emailList = multiResult.emails;
+
   // Operation classification
   const isSlackOp = Boolean(currentStep && (currentProvider === 'slack' || (currentOperation && currentOperation.includes('slack'))));
   const isAIOp = Boolean(currentStep && (currentProvider === 'ai' || (currentOperation && currentOperation.includes('ai.'))));
   const isGmailOp = Boolean(currentStep && (currentProvider === 'gmail' || (currentOperation && currentOperation.includes('gmail'))));
+  const isGmailSendOp = Boolean(isGmailOp && (
+    (currentOperation && currentOperation.includes('send')) ||
+    (currentStep?.operation && String(currentStep.operation).includes('send')) ||
+    Boolean(singleEmail.recipient)
+  ));
   const isConditionOp = Boolean(currentStep && (currentProvider === 'condition' || currentProvider === 'if' || (currentOperation && (currentOperation.includes('condition') || currentOperation.includes('if')))));
   const isLoopOp = Boolean(currentStep && (currentProvider === 'loop' || currentProvider === 'iterator' || (currentOperation && (currentOperation.includes('loop') || currentOperation.includes('forEach') || currentOperation.includes('iterator')))));
   const isApprovalOp = Boolean(currentStep && (currentProvider === 'approval' || currentProvider === 'human_approval' || (currentOperation && currentOperation.includes('approval'))));
@@ -453,11 +463,6 @@ const ExecutionResultInspectorInner: React.FC<ExecutionResultInspectorProps> = (
     skippedReasonText = `Branch unselected by condition node ${conditionNodeId}`;
   }
 
-  // Extract Gmail details for current step or execution result
-  const singleEmail = extractGmailMessageDetails(currentStep || executionResult);
-  const multiResult = extractMultipleGmailMessageDetails(currentStep || executionResult);
-  const emailList = multiResult.emails;
-
   const handleCopyId = (idText: string) => {
     navigator.clipboard.writeText(idText);
     setCopiedId(idText);
@@ -467,7 +472,7 @@ const ExecutionResultInspectorInner: React.FC<ExecutionResultInspectorProps> = (
   const responseObj = currentOutput?.response || currentOutput?.body || currentOutput?.result || currentOutput;
 
   // ── Slack Output Details Normalization ──
-  const { slackResult, slackChannel, slackTs, slackText, slackOk } = extractSlackResultDetails(
+  const { slackResult, slackChannel, slackTs, slackText, slackOk, slackError } = extractSlackResultDetails(
     currentOutput,
     currentStepSuccess,
     currentStep
@@ -837,9 +842,20 @@ const ExecutionResultInspectorInner: React.FC<ExecutionResultInspectorProps> = (
                     {slackOk ? 'Posted Message Text:' : 'Error Details:'}
                   </span>
                   <div className={`p-2.5 rounded-lg bg-background border border-border/80 font-sans text-xs whitespace-pre-wrap leading-relaxed ${slackOk ? 'text-foreground' : 'text-destructive font-mono'}`}>
-                    {slackText}
+                    {slackOk ? slackText : (slackError || 'Slack operation failed.')}
                   </div>
                 </div>
+
+                {!slackOk && slackText && slackText !== slackError && (
+                  <div className="space-y-1 pt-1">
+                    <span className="text-muted-foreground font-semibold text-[10px] uppercase tracking-wider">
+                      Intended Message Content:
+                    </span>
+                    <div className="p-2.5 rounded-lg bg-background border border-border/80 font-sans text-xs whitespace-pre-wrap leading-relaxed text-foreground">
+                      {slackText}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1188,13 +1204,13 @@ const ExecutionResultInspectorInner: React.FC<ExecutionResultInspectorProps> = (
         {/* ── SINGLE EMAIL RESULT VIEW (Gmail Get/Send) ── */}
         {isGmailOp && currentStatus !== 'SKIPPED' && !isMultiView && (singleEmail.isDetailed || (singleEmail.messageId && singleEmail.messageId !== '—')) && (
           <div className="pt-2.5 border-t border-border/60 space-y-2 text-xs">
-            {/* Sender */}
+            {/* Sender / Recipient */}
             <div className="space-y-0.5">
               <span className="font-bold text-muted-foreground text-[10px] uppercase tracking-wider flex items-center gap-1">
-                <User className="h-3 w-3 text-primary" /> Sender:
+                <User className="h-3 w-3 text-primary" /> {isGmailSendOp ? 'Recipient:' : 'Sender:'}
               </span>
               <div className="p-2 rounded bg-background border border-border font-mono text-xs text-foreground font-medium">
-                {singleEmail.sender}
+                {isGmailSendOp ? (singleEmail.recipient || singleEmail.sender) : singleEmail.sender}
               </div>
             </div>
 

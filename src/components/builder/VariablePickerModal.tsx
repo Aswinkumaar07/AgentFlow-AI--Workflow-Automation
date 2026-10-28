@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Search, X, Code2, Layers, Clock, Repeat, Zap, Check } from 'lucide-react';
+import { useWorkflowStore } from '../../store/useWorkflowStore';
 
 export interface VariableItem {
   name: string;
@@ -141,11 +142,79 @@ export const VariablePickerModal: React.FC<VariablePickerModalProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [copiedExpr, setCopiedExpr] = useState<string | null>(null);
 
+  const { nodes, selectedNode, edges } = useWorkflowStore();
+
   if (!isOpen) return null;
 
+  // Helper to find preceding/upstream nodes in the workflow DAG
+  const getUpstreamNodes = () => {
+    if (!selectedNode) return nodes;
+    const targetId = selectedNode.id;
+
+    // Build set of downstream nodes reachable from selectedNode
+    const downstreamSet = new Set<string>();
+    downstreamSet.add(targetId);
+    let added = true;
+    while (added) {
+      added = false;
+      edges.forEach((edge) => {
+        if (downstreamSet.has(edge.source) && !downstreamSet.has(edge.target)) {
+          downstreamSet.add(edge.target);
+          added = true;
+        }
+      });
+    }
+
+    return nodes.filter((n) => !downstreamSet.has(n.id));
+  };
+
+  const upstreamNodes = getUpstreamNodes();
+  const dynamicNodeVars: VariableItem[] = [];
+
+  upstreamNodes.forEach((node) => {
+    const nodeId = node.id;
+    const nodeData = (node.data || {}) as Record<string, any>;
+    const nodeLabel = String(nodeData.label || nodeData.operation || nodeData.name || nodeId);
+
+    const propertyKeys = new Set<string>();
+
+    if (nodeData.response_schema?.properties && typeof nodeData.response_schema.properties === 'object') {
+      Object.keys(nodeData.response_schema.properties).forEach((k) => propertyKeys.add(k));
+    }
+
+    if (nodeData.parameters && typeof nodeData.parameters === 'object') {
+      Object.keys(nodeData.parameters).forEach((k) => {
+        if (!k.startsWith('auth_') && !['url', 'http_method', 'method', 'is_dynamic_api'].includes(k)) {
+          propertyKeys.add(k);
+        }
+      });
+    }
+
+    ['petId', 'id', 'status', 'quantity', 'shipDate', 'complete'].forEach((k) => propertyKeys.add(k));
+
+    dynamicNodeVars.push({
+      name: `${nodeLabel} — Full Output Data`,
+      expression: `{{${nodeId}.data}}`,
+      category: 'Node',
+      description: `Complete JSON response object from step ${nodeId}`,
+      sample_value: '{"id": 1, "petId": 100, "status": "placed"}',
+    });
+
+    propertyKeys.forEach((key) => {
+      dynamicNodeVars.push({
+        name: `${nodeLabel} — ${key}`,
+        expression: `{{${nodeId}.data.${key}}}`,
+        category: 'Node',
+        description: `Output field '${key}' from step ${nodeId} (${nodeLabel})`,
+        sample_value: key === 'petId' ? '100' : key === 'id' ? '1' : key === 'status' ? 'placed' : '10',
+      });
+    });
+  });
+
+  const allVariables = [...dynamicNodeVars, ...DEFAULT_VARIABLES];
   const categories = ['All', 'Node', 'Loop', 'System', 'Trigger'];
 
-  const filteredVariables = DEFAULT_VARIABLES.filter((item) => {
+  const filteredVariables = allVariables.filter((item) => {
     const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
     const matchesSearch =
       item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -251,9 +320,9 @@ export const VariablePickerModal: React.FC<VariablePickerModalProps> = ({
               No variables found matching "{searchTerm}"
             </div>
           ) : (
-            filteredVariables.map((item) => (
+            filteredVariables.map((item, idx) => (
               <div
-                key={item.expression}
+                key={`${item.expression}_${idx}`}
                 onClick={() => handleInsert(item.expression)}
                 className="group flex items-center justify-between p-3.5 border border-slate-200 dark:border-slate-800 hover:border-indigo-500 dark:hover:border-indigo-500 rounded-lg cursor-pointer bg-white dark:bg-slate-800/40 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 transition"
               >

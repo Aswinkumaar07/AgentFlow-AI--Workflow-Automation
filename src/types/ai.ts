@@ -5,6 +5,7 @@ export interface AIGenerateRequest {
 export interface AIGenerateStep {
   step_id: string;
   provider: string;
+  provider_name?: string;
   operation_id: string;
   parameters: Record<string, any>;
   dependencies?: string[];

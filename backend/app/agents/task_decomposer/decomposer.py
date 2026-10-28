@@ -147,7 +147,106 @@ class EnterpriseTaskDecomposer:
         tasks = self._deterministic_decompose_patterns(prompt, p_lower)
         if tasks:
             return self._apply_generic_approval(prompt, p_lower, tasks)
+
+        dynamic_tasks = self._split_dynamic_multi_operations(prompt, p_lower)
+        if dynamic_tasks:
+            return self._apply_generic_approval(prompt, p_lower, dynamic_tasks)
+
         return None
+
+    def _split_dynamic_multi_operations(self, prompt: str, p_lower: str) -> Optional[List[DecomposedTask]]:
+        if not prompt or not prompt.strip():
+            return None
+
+        # Mask quoted strings to prevent splitting inside quotes (e.g. 'A and then B')
+        quotes: List[str] = []
+        def _quote_repl(match):
+            quotes.append(match.group(0))
+            return f"__QUOTE_{len(quotes)-1}__"
+
+        masked_prompt = re.sub(r"(['\"][^'\"]*['\"])", _quote_repl, prompt)
+        masked_lower = masked_prompt.lower()
+
+        # Extract OpenAPI / Spec URL context if present
+        spec_url = ""
+        url_match = re.search(r"https?://[^\s]+", prompt)
+        if url_match:
+            spec_url = url_match.group(0)
+
+        # Remove trailing or inline spec context phrase from masked_prompt for cleaner clause splitting
+        spec_context_phrase = ""
+        spec_phrase_match = re.search(
+            r"\s+((?:using|from|with|in|via|on)\s+(?:this\s+)?(?:openapi|swagger|api)?\s*(?:spec(?:ification)?)?\s*:?\s*https?://[^\s]+)",
+            masked_prompt,
+            re.IGNORECASE
+        )
+        if spec_phrase_match:
+            spec_context_phrase = spec_phrase_match.group(1).strip()
+            masked_prompt = (masked_prompt[:spec_phrase_match.start()] + " " + masked_prompt[spec_phrase_match.end():]).strip()
+            masked_lower = masked_prompt.lower()
+        elif spec_url:
+            spec_context_phrase = f"using {spec_url}"
+            masked_prompt = masked_prompt.replace(spec_url, "").strip()
+            masked_lower = masked_prompt.lower()
+
+        clauses: List[str] = []
+
+        # Check explicit Step 1: ... Step 2: ...
+        if re.search(r"\bstep\s*1[\:\.\-]", masked_lower):
+            raw_clauses = re.split(r"\bstep\s*\d+[\:\.\-]\s*", masked_prompt, flags=re.IGNORECASE)
+            clauses = [c.strip(" .,;") for c in raw_clauses if c and c.strip(" .,;")]
+
+        if not clauses:
+            norm_prompt = re.sub(r"^\s*first\s+", "", masked_prompt, flags=re.IGNORECASE)
+            has_seq_marker = bool(
+                re.search(r"\b(?:and\s+then|after\s+that|followed\s+by|then|next)\b", masked_lower)
+                or ";" in masked_prompt
+            )
+            if has_seq_marker:
+                split_pattern = r"(?:\s+and\s+then\s+|\s*,?\s*after\s+that\s+|\s*,?\s*followed\s+by\s+|\s*(?:[;,]|\.)\s*then\s+|\s+then\s+|\s*;+\s*|\s*,?\s*next\s+)"
+                raw_split = re.split(split_pattern, norm_prompt, flags=re.IGNORECASE)
+                clauses = [c.strip(" .,;") for c in raw_split if c and c.strip(" .,;")]
+
+        valid_clauses: List[str] = []
+        for c in clauses:
+            # Unmask quotes
+            for idx, q in enumerate(quotes):
+                c = c.replace(f"__QUOTE_{idx}__", q)
+            c_clean = c.strip(" .,;")
+            if c_clean and not re.match(r"^https?://[^\s]+$", c_clean) and len(c_clean) > 2:
+                valid_clauses.append(c_clean)
+
+        if len(valid_clauses) < 2:
+            return None
+
+        tasks: List[DecomposedTask] = []
+        for idx, clause in enumerate(valid_clauses):
+            step_num = idx + 1
+            instruction_text = clause
+            if spec_context_phrase:
+                unmasked_spec = spec_context_phrase
+                for q_idx, q in enumerate(quotes):
+                    unmasked_spec = unmasked_spec.replace(f"__QUOTE_{q_idx}__", q)
+                if unmasked_spec not in instruction_text and (spec_url == "" or spec_url not in instruction_text):
+                    instruction_text = f"{clause} {unmasked_spec}".strip()
+
+            depends = [step_num - 1] if step_num > 1 else []
+            task_name = " ".join(clause.split()[:4]).capitalize() if clause else f"Action Step {step_num}"
+
+            tasks.append(
+                DecomposedTask(
+                    step=step_num,
+                    name=task_name,
+                    provider="generic",
+                    operation="execute.action",
+                    parameters={"instruction": instruction_text},
+                    depends_on=depends,
+                    read_only=True,
+                    side_effect=False,
+                )
+            )
+
+        return tasks
 
     def _deterministic_decompose_patterns(self, prompt: str, p_lower: str) -> Optional[List[DecomposedTask]]:
         from app.agents.planner.gmail_search_query_builder import extract_gmail_result_count
@@ -245,7 +344,7 @@ class EnterpriseTaskDecomposer:
                 return tasks
 
         # Pattern 1: Scheduled Email / Scheduled Read & Summarize (Excludes Slack multi-service flows)
-        if ("schedule" in p_lower or "every" in p_lower or "after 2 hours" in p_lower or "tomorrow at" in p_lower or "next monday at" in p_lower) and not "draft" in p_lower and not "postponed" in p_lower and not ("slack" in p_lower or "#" in p_lower):
+        if ("schedule" in p_lower or "every" in p_lower or "after 2 hours" in p_lower or "tomorrow" in p_lower or "next monday" in p_lower) and not "draft" in p_lower and not "postponed" in p_lower and not ("slack" in p_lower or "#" in p_lower):
             from app.services.workflow_scheduler import workflow_scheduler_service
             sched_expr = workflow_scheduler_service.extract_schedule_expression(prompt)
             if ("read" in p_lower or "unread" in p_lower or "find" in p_lower or "get" in p_lower or "latest" in p_lower) and ("summarize" in p_lower or "summary" in p_lower):
@@ -399,6 +498,7 @@ class EnterpriseTaskDecomposer:
         is_slack_op = ("slack" in p_lower or "#" in p_lower) and "slack" not in prohibited
         is_drive_op = any(w in p_lower for w in ["drive", "google drive", "upload"]) and "google_drive" not in prohibited
         is_attachment_op = any(w in p_lower for w in ["attachment", "attachments", "download", "pdf", "file"])
+        is_notify_op = any(w in p_lower for w in ["slack", "notify", "notification", "channel"])
 
         has_condition_kw = any(w in p_lower for w in ["check whether", "check if", "if so", "if true", "if false", "if contains", "if email contains", "if subject", "if body", "otherwise", "unless", "depending on", "only if"]) or p_lower.startswith("if ") or " if " in p_lower
         if is_gmail_op and has_condition_kw:
@@ -613,7 +713,7 @@ class EnterpriseTaskDecomposer:
             ]
 
         # Multi-service Pattern D: Gmail -> Attachment Extraction -> Google Drive Upload
-        if is_gmail_op and is_attachment_op and is_drive_op:
+        if is_gmail_op and is_attachment_op and is_drive_op and not is_notify_op:
             return [
                 DecomposedTask(
                     step=1,
@@ -774,7 +874,7 @@ class EnterpriseTaskDecomposer:
                 ]
 
         # Pattern AI-34: Google Drive File Search / List Operations
-        if ("google drive" in p_lower or "drive" in p_lower) and not ("gmail" in p_lower or "email" in p_lower or "inbox" in p_lower or "mail" in p_lower):
+        if ("google drive" in p_lower or "drive" in p_lower) and not ("gmail" in p_lower or "email" in p_lower or "inbox" in p_lower or "mail" in p_lower or "invoice" in p_lower or "invoices" in p_lower):
             target_channel = deterministic_normalizer.extract_slack_channel(prompt) or "#general"
             if any(w in p_lower for w in ["search", "find", "list", "files", "get", "query"]):
                 q_param = "name contains 'project'" if "project" in p_lower else ""
@@ -925,6 +1025,11 @@ class EnterpriseTaskDecomposer:
 
         # Pattern 4: Reply to email
         if any(w in p_lower for w in ["reply to", "send reply", "respond to", "reply saying", "reply with"]):
+            reply_text = "Thank you, I received your email and will get back to you shortly."
+            reply_match = re.search(r'(?:saying|with|body)\s*["\']([^"\']+)["\']', prompt, re.IGNORECASE)
+            if reply_match:
+                reply_text = reply_match.group(1).strip()
+
             return [
                 DecomposedTask(
                     step=1,
@@ -951,7 +1056,12 @@ class EnterpriseTaskDecomposer:
                     name="Send Reply",
                     provider="gmail",
                     operation="gmail.messages.reply",
-                    parameters={"message_id": "{{step_2.messageId}}", "thread_id": "{{step_2.threadId}}", "body": "I will attend."},
+                    parameters={
+                        "message_id": "{{step_2.messageId}}",
+                        "thread_id": "{{step_2.threadId}}",
+                        "to": "{{step_2.from}}",
+                        "body": reply_text,
+                    },
                     depends_on=[2],
                     read_only=False,
                     side_effect=True,
@@ -1012,7 +1122,8 @@ class EnterpriseTaskDecomposer:
 
         # Pattern 4c: Delete email
         has_negative_delete = ("do not" in p_lower or "don't" in p_lower or "never" in p_lower) and any(w in p_lower for w in ["delete", "trash", "purge"])
-        if any(w in p_lower for w in ["delete", "trash", "purge"]) and not has_negative_delete:
+        is_email_context = any(w in p_lower for w in ["email", "emails", "mail", "gmail", "message", "messages", "inbox", "draft", "drafts"])
+        if any(w in p_lower for w in ["delete", "trash", "purge"]) and is_email_context and not has_negative_delete:
             return [
                 DecomposedTask(
                     step=1,

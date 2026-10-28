@@ -1,3 +1,4 @@
+import os
 import time
 import logging
 import httpx
@@ -10,6 +11,86 @@ from app.connectors.providers.gmail.adapter import GmailAdapter
 from app.connectors.providers.slack.adapter import SlackAdapter
 
 logger = logging.getLogger("agentflow.runtime.live_node_executor")
+
+
+def is_test_environment_http_allowed() -> bool:
+    """
+    Checks if HTTP scheme is allowed for local test suites via environment configuration.
+    Workflow-supplied payload flags are not trusted to disable production HTTPS enforcement.
+    """
+    return (
+        os.environ.get("TEST_MODE", "").lower() == "true"
+        or os.environ.get("ALLOW_HTTP_FOR_TESTS", "").lower() == "true"
+    )
+
+
+SENSITIVE_KEY_PATTERNS = {
+    "auth", "key", "token", "secret", "credential", "password", "pwd", "bearer", "api_key", "apikey"
+}
+
+
+def is_sensitive_key(key_name: str) -> bool:
+    """Returns True if key name matches known sensitive credential key patterns."""
+    k_lower = str(key_name).lower()
+    return any(pattern in k_lower for pattern in SENSITIVE_KEY_PATTERNS)
+
+
+def redact_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Returns a redacted copy of request headers."""
+    redacted = {}
+    for k, v in headers.items():
+        if is_sensitive_key(k):
+            redacted[k] = "***"
+        else:
+            redacted[k] = v
+    return redacted
+
+
+def redact_url_query_params(url: str) -> str:
+    """Redacts sensitive query parameters from a URL string for logging and execution history."""
+    try:
+        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+        parsed = urlparse(url)
+        if not parsed.query:
+            return url
+
+        qs_dict = parse_qs(parsed.query, keep_blank_values=True)
+        new_qs = []
+        for param, vals in qs_dict.items():
+            if is_sensitive_key(param):
+                new_qs.append((param, "***"))
+            else:
+                for val in vals:
+                    new_qs.append((param, val))
+
+        new_query = urlencode(new_qs)
+        return urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            new_query,
+            parsed.fragment,
+        ))
+    except Exception:
+        return url
+
+
+def redact_payload(obj: Any) -> Any:
+    """Recursively redacts sensitive keys in dictionaries/lists for logging and execution history."""
+    if isinstance(obj, dict):
+        redacted = {}
+        for k, v in obj.items():
+            if is_sensitive_key(k):
+                redacted[k] = "***"
+            else:
+                redacted[k] = redact_payload(v)
+        return redacted
+    elif isinstance(obj, list):
+        return [redact_payload(item) for item in obj]
+    else:
+        return obj
+
 
 
 class LiveNodeExecutionResult(BaseModel):
@@ -385,14 +466,89 @@ class LiveNodeExecutor:
         op_key = operation_id.lower()
 
         if params.get("url") or params.get("endpoint"):
-            url = params.get("url") or params.get("endpoint")
+            raw_url = str(params.get("url") or params.get("endpoint"))
             method = str(params.get("method") or "POST").upper()
         elif p_key in self.PROVIDER_ENDPOINTS:
             m_tuple = self.PROVIDER_ENDPOINTS[p_key].get(op_key) or self.PROVIDER_ENDPOINTS[p_key]["default"]
-            method, url = m_tuple[0], m_tuple[1]
+            method, raw_url = m_tuple[0], m_tuple[1]
         else:
-            url = "https://httpbin.org/post"
+            raw_url = "https://httpbin.org/post"
             method = "POST"
+
+        import re
+        from urllib.parse import quote
+
+        path_param_matches = re.findall(r"\{([a-zA-Z0-9_]+)\}", raw_url)
+        url = raw_url
+        substituted_path_keys = set()
+
+        if path_param_matches:
+            params_lower_map = {str(k).lower(): (k, v) for k, v in params.items()}
+
+            for param_name in path_param_matches:
+                matched_val = None
+                if param_name in params and params[param_name] is not None:
+                    matched_val = params[param_name]
+                elif param_name.lower() in params_lower_map:
+                    orig_k, val = params_lower_map[param_name.lower()]
+                    if val is not None:
+                        matched_val = val
+
+                val_str = str(matched_val).strip() if matched_val is not None else ""
+
+                if matched_val is None or not val_str or "{{" in val_str:
+                    err_msg = f"Missing required path parameter '{param_name}' for target URL '{raw_url}'."
+                    logs.append(err_msg)
+                    errors.append(err_msg)
+                    end_time = time.perf_counter()
+                    latency_ms = round((end_time - start_time) * 1000, 2)
+                    return LiveNodeExecutionResult(
+                        node_id=node_id,
+                        provider=provider,
+                        operation_id=operation_id,
+                        status_code=400,
+                        status="FAILED",
+                        latency_ms=latency_ms,
+                        retries=0,
+                        request={"url": raw_url, "method": method, "headers": {}, "payload": params},
+                        response={"status_code": 400, "headers": {}, "body": {"error": err_msg}},
+                        errors=errors,
+                        logs=logs,
+                        telemetry={"executor": "LiveNodeExecutor (Path Parameter Guard)", "latency_ms": latency_ms},
+                    )
+
+                encoded_val = quote(val_str, safe="")
+                url = url.replace(f"{{{param_name}}}", encoded_val)
+                substituted_path_keys.add(param_name)
+
+        if params.get("is_dynamic_api") or params.get("validate_url") or p_key == "generic_rest":
+            from app.agents.api_discovery.fetcher import validate_runtime_target_url
+            allow_http = is_test_environment_http_allowed()
+            if not validate_runtime_target_url(url, allow_http_for_tests=allow_http):
+                err_msg = f"SSRF Blocked: Target URL '{url}' violates security boundaries."
+                logs.append(err_msg)
+                errors.append(err_msg)
+                end_time = time.perf_counter()
+                latency_ms = round((end_time - start_time) * 1000, 2)
+                return LiveNodeExecutionResult(
+                    node_id=node_id,
+                    provider=provider,
+                    operation_id=operation_id,
+                    status_code=400,
+                    status="FAILED",
+                    latency_ms=latency_ms,
+                    retries=0,
+                    request={
+                        "url": redact_url_query_params(url),
+                        "method": method,
+                        "headers": redact_headers(headers if "headers" in locals() else {}),
+                        "payload": redact_payload(params),
+                    },
+                    response={"status_code": 400, "headers": {}, "body": {"error": err_msg}},
+                    errors=errors,
+                    logs=logs,
+                    telemetry={"executor": "LiveNodeExecutor (SSRF Guard)", "latency_ms": latency_ms},
+                )
 
         headers = {
             "Content-Type": "application/json",
@@ -419,7 +575,11 @@ class LiveNodeExecutor:
         response_headers: Dict[str, str] = {}
         execution_status = "FAILED"
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        allow_http = is_test_environment_http_allowed()
+        from app.agents.api_discovery.fetcher import SecurePinnedTransport
+        transport = SecurePinnedTransport(allow_http_for_tests=allow_http)
+
+        async with httpx.AsyncClient(transport=transport, timeout=15.0, trust_env=False) as client:
             for attempt in range(max_retries + 1):
                 try:
                     logs.append(f"Attempt {attempt + 1}: Executing {method} {url}...")
@@ -446,7 +606,7 @@ class LiveNodeExecutor:
                         time.sleep(0.3 * retries_done)
                         continue
 
-                    if res.is_success or status_code in [200, 201, 202, 204, 400, 401, 403, 404]:
+                    if res.is_success or (200 <= status_code < 300):
                         execution_status = "SUCCESS"
                         logs.append(f"Real API response: HTTP {status_code} from {url}.")
                         break
@@ -465,18 +625,6 @@ class LiveNodeExecutor:
                     if attempt < max_retries:
                         time.sleep(0.1)
 
-        # Fallback for test endpoint timeouts
-        if execution_status != "SUCCESS" and "httpbin.org" in url:
-            status_code = 200
-            execution_status = "SUCCESS"
-            response_data = {
-                "json": request_payload,
-                "url": url,
-                "status": "httpbin_execution_completed",
-            }
-            errors.clear()
-            logs.append(f"Execution completed for endpoint {url}.")
-
         end_time = time.perf_counter()
         latency_ms = round((end_time - start_time) * 1000, 2)
 
@@ -489,15 +637,16 @@ class LiveNodeExecutor:
             latency_ms=latency_ms,
             retries=retries_done,
             request={
-                "url": url,
+                "url": redact_url_query_params(url),
                 "method": method,
-                "headers": {k: ("***" if "auth" in k.lower() else v) for k, v in headers.items()},
-                "payload": request_payload,
+                "headers": redact_headers(headers),
+                "payload": redact_payload(request_payload),
             },
             response={
                 "status_code": status_code,
                 "headers": response_headers,
                 "body": response_data,
+                "data": response_data,
             },
             errors=errors,
             logs=logs,

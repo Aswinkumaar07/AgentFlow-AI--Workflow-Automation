@@ -29,17 +29,25 @@ class ExecutionHistoryStore:
             return
         try:
             if os.path.exists(self._storage_dir):
-                for fname in os.listdir(self._storage_dir):
-                    if fname.endswith(".json"):
-                        fpath = os.path.join(self._storage_dir, fname)
-                        try:
-                            with open(fpath, "r", encoding="utf-8") as f:
-                                data = json.load(f)
-                            state = WorkflowExecutionStateV2.model_validate(data)
-                            if state.execution_id not in self._history:
-                                self._history[state.execution_id] = state
-                        except Exception:
-                            pass
+                entries = []
+                with os.scandir(self._storage_dir) as it:
+                    for entry in it:
+                        if entry.is_file() and entry.name.endswith(".json"):
+                            try:
+                                entries.append((entry.stat().st_mtime, entry.path))
+                            except OSError:
+                                pass
+                # Sort newest first, load latest 200
+                entries.sort(key=lambda x: x[0], reverse=True)
+                for _, fpath in entries[:200]:
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        state = WorkflowExecutionStateV2.model_validate(data)
+                        if state.execution_id not in self._history:
+                            self._history[state.execution_id] = state
+                    except Exception:
+                        pass
             self._disk_loaded = True
         except Exception as exc:
             logger.warning(f"Failed loading execution history from disk: {exc}")

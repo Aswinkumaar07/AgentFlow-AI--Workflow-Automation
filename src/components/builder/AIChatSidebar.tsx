@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useWorkflowStore } from '../../store/useWorkflowStore';
 import { useOAuthStore } from '../../store/useOAuthStore';
 import { aiApi } from '../../api/ai';
@@ -17,6 +18,7 @@ interface AIChatSidebarProps {
 }
 
 export const AIChatSidebar: React.FC<AIChatSidebarProps> = ({ onOpenSchedules }) => {
+  const [, setSearchParams] = useSearchParams();
   const [prompt, setPrompt] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [createdSchedule, setCreatedSchedule] = useState<any>(null);
@@ -115,6 +117,16 @@ export const AIChatSidebar: React.FC<AIChatSidebarProps> = ({ onOpenSchedules })
       const res = await aiApi.generateWorkflow(finalPrompt);
       setWorkflow(res);
       setPrompt('');
+
+      const genWfId =
+        (res as any)?.workflow_id ||
+        (res as any)?.workflow_json?.workflow_id ||
+        (res as any)?.data?.workflow_id ||
+        (res as any)?.data?.workflow_json?.workflow_id;
+      if (genWfId) {
+        setSearchParams({ id: genWfId }, { replace: true });
+        window.dispatchEvent(new CustomEvent('workflow-created', { detail: { workflowId: genWfId } }));
+      }
 
       console.log('[AI30 SCHEDULE] creation processing started');
       const sched = (res as any)?.schedule || (res as any)?.data?.schedule;

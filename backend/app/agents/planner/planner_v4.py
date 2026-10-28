@@ -198,20 +198,39 @@ class IntelligentPlannerEngineV4:
             resolved = connector_registry._resolve_key(prov_key)
             if resolved in seen_resolved:
                 continue
+            if prov_key == "github" and any(kw in p_lower for kw in ["github pr", "github issue"]):
+                continue
             meta = connector_registry.get_connector_metadata(prov_key)
             if meta and meta.display_name:
                 p_display = meta.display_name
-                if (prov_key in p_lower or p_display.lower() in p_lower) and not any(kw in p_lower for kw in ["github pr", "github issue"]):
+                if re.search(r'\b' + re.escape(prov_key) + r'\b', p_lower) or p_display.lower() in p_lower:
                     if p_display not in selected_providers:
                         selected_providers.append(p_display)
                         seen_resolved.add(resolved)
 
+        bridge_res = None
         if not selected_providers:
-            candidates = connector_selector.select_connectors(prompt, top_k=3)
-            # AI-10: Provider-agnostic — never hardcode Gmail as fallback
-            selected_providers = [c.provider for c in candidates if c.provider != trigger["type"]]
+            # AI-37 Phase 3: Check for explicit OpenAPI/Swagger spec URL when zero native providers are matched
+            from app.agents.planner.ai37_planner_bridge import ai37_planner_bridge
+            bridge_res = ai37_planner_bridge.discover_if_eligible(prompt)
+            if bridge_res.attempted:
+                if bridge_res.success and bridge_res.provider and bridge_res.discovered_ops_count > 0:
+                    selected_providers.append(bridge_res.provider)
+                    trace.append(
+                        f"Stage 3 [AI-37 Dynamic API Discovery]: Discovered provider '{bridge_res.provider}' "
+                        f"with {bridge_res.discovered_ops_count} operation(s) from URL '{bridge_res.url}'"
+                    )
+                else:
+                    trace.append(
+                        f"Stage 3 [AI-37 Dynamic API Discovery]: Spec discovery failed for URL '{bridge_res.url}': {bridge_res.error_message or 'Unknown error'}"
+                    )
+
             if not selected_providers:
-                logger.warning("[AI-10] No provider matched for prompt. Workflow will have 0 provider nodes.")
+                candidates = connector_selector.select_connectors(prompt, top_k=3)
+                # AI-10: Provider-agnostic — never hardcode Gmail as fallback
+                selected_providers = [c.provider for c in candidates if c.provider != trigger["type"]]
+                if not selected_providers:
+                    logger.warning("[AI-10] No provider matched for prompt. Workflow will have 0 provider nodes.")
 
         trace.append(f"Stage 3 [Connector Selection]: Providers = {selected_providers}")
 
@@ -266,6 +285,37 @@ class IntelligentPlannerEngineV4:
             "condition": "Condition IF/ELSE",
         }
 
+        stage3_providers = list(selected_providers)
+
+        # PR Trigger Multi-Service Normalization (GitHub PR -> Slack + Notion)
+        if is_github and ("pr" in p_lower or "pull request" in p_lower) and is_slack and is_notion:
+            if len(decomp_res.tasks) == 1 and decomp_res.tasks[0].operation == "github.issues.create":
+                from app.agents.task_decomposer.models import DecomposedTask
+                from app.agents.planner.deterministic_normalizer import deterministic_normalizer
+                target_chan = deterministic_normalizer.extract_slack_channel(prompt) or "#general"
+                decomp_res.tasks = [
+                    DecomposedTask(
+                        step=1,
+                        name="Post Slack Notification",
+                        provider="slack",
+                        operation="slack.chat.postMessage",
+                        parameters={"channel": target_chan, "text": "New GitHub PR opened."},
+                        depends_on=[],
+                        read_only=False,
+                        side_effect=True,
+                    ),
+                    DecomposedTask(
+                        step=2,
+                        name="Create Notion Page",
+                        provider="notion",
+                        operation="notion.pages.create",
+                        parameters={"title": "PR Review: {{trigger_payload.title}}"},
+                        depends_on=[1],
+                        read_only=False,
+                        side_effect=True,
+                    ),
+                ]
+
         # ---------------------------------------------------------------
         # Sprint AI-14: Universal Task-to-DAG Auto-Builder
         # TaskDecomposer is the SINGLE SOURCE OF TRUTH for operation selection.
@@ -277,10 +327,56 @@ class IntelligentPlannerEngineV4:
 
         for task in decomp_res.tasks:
             step_id = f"step_{task.step}"
+            if bridge_res and bridge_res.success and bridge_res.provider:
+                if (task.provider or "generic").lower() in ["generic", "unknown", ""] or (task.operation or "").lower() in ["execute.action", ""]:
+                    task_instruction = (
+                        task.parameters.get("instruction")
+                        or task.name
+                        or prompt
+                    )
+                    upstream_resp_schema = {}
+                    if task.step > 1 and len(nodes) > 0 and getattr(task, "depends_on", []):
+                        upstream_node = nodes[-1]
+                        upstream_op_name = upstream_node.get("operation")
+                        for cat_op in operation_ranker.OPERATION_CATALOG:
+                            if cat_op.get("operation") == upstream_op_name:
+                                upstream_resp_schema = cat_op.get("response_schema", {})
+                                break
+                        if not upstream_resp_schema and bridge_res and bridge_res.discovered_ops:
+                            for disc_op in bridge_res.discovered_ops:
+                                if disc_op.get("operation") == upstream_op_name or disc_op.get("operation_id") == upstream_op_name:
+                                    upstream_resp_schema = disc_op.get("response_schema", {})
+                                    break
+
+                    ranked_ops = operation_ranker.rank_operations(
+                        task_instruction,
+                        target_provider=bridge_res.provider,
+                        top_k=1,
+                        upstream_response_schema=upstream_resp_schema,
+                    )
+                    if ranked_ops:
+                        task.provider = "generic_rest"
+                        task.provider_name = bridge_res.provider
+                        task.operation = ranked_ops[0].operation
+                        if ranked_ops[0].parameters:
+                            task.parameters = {**ranked_ops[0].parameters, **(task.parameters or {})}
+                    elif bridge_res.discovered_ops:
+                        first_op = bridge_res.discovered_ops[0]
+                        task.provider = "generic_rest"
+                        task.provider_name = bridge_res.provider
+                        task.operation = first_op.get("operation") or first_op.get("operation_id") or "generic.http.request"
+                        if first_op.get("parameters"):
+                            task.parameters = {**first_op.get("parameters", {}), **(task.parameters or {})}
+            elif (task.provider or "generic").lower() in ["generic", "unknown", ""] and "Gmail" in stage3_providers:
+                if any(w in p_lower for w in ["email", "mail", "gmail", "send", "wish", "greeting", "night", "morning", "birthday", "apology"]):
+                    task.provider = "gmail"
+                    task.operation = "gmail.messages.send"
+
             provider = (task.provider or "generic").lower().replace(" ", "_")
             operation = task.operation or "execute.action"
-            auth_type = PROVIDER_AUTH_MAP.get(provider, "google_oauth")
-            display_name = PROVIDER_DISPLAY_MAP.get(provider, provider.replace("_", " ").title())
+            auth_type = PROVIDER_AUTH_MAP.get(provider, "none" if provider == "generic_rest" else "google_oauth")
+            display_name = bridge_res.provider if (bridge_res and bridge_res.success and bridge_res.provider) else PROVIDER_DISPLAY_MAP.get(provider, provider.replace("_", " ").title())
+            provider_name = getattr(task, "provider_name", None) or display_name
 
             node_params: Dict[str, Any] = dict(task.parameters or {})
 
@@ -306,11 +402,20 @@ class IntelligentPlannerEngineV4:
                     node_params.setdefault("max_results", 10)
                     logger.info(f"[AI-21][RESULT_COUNT_DEFAULT] max_results={node_params['max_results']}")
             elif operation in ["gmail.messages.send", "gmail.drafts.create", "gmail.messages.forward"]:
+                subj, body, inf_reasoning = self._infer_email_content(prompt, entities)
+                if inf_reasoning:
+                    trace.append(inf_reasoning)
                 params = extract_gmail_parameters(prompt)
                 if "{{" not in node_params.get("body", ""):
                     node_params.setdefault("to", params["to"])
-                    node_params.setdefault("subject", params["subject"])
-                    node_params.setdefault("body", params["body"])
+                    if subj:
+                        node_params["subject"] = subj
+                    else:
+                        node_params.setdefault("subject", params["subject"])
+                    if body:
+                        node_params["body"] = body
+                    else:
+                        node_params.setdefault("body", params["body"])
             elif operation in ["gmail.messages.mark_read", "gmail.messages.mark_unread"]:
                 node_params.setdefault("q", "is:unread")
             elif operation == "gmail.messages.delete":
@@ -334,6 +439,7 @@ class IntelligentPlannerEngineV4:
                 "step_id": step_id,
                 "label": task.name or f"Step {task.step}",
                 "provider": provider,
+                "provider_name": provider_name,
                 "operation": operation,
                 "operation_id": operation,
                 "parameters": node_params,
@@ -352,6 +458,68 @@ class IntelligentPlannerEngineV4:
             selected_providers.append(display_name)
             selected_ops.append(operation)
             logger.info(f"[AI-14][OPERATION_SELECTION] step={step_id} provider={provider} operation={operation}")
+
+        # AI-37 Phase 16: Response-to-Request Parameter Mapping Engine Pass for Multi-Step Chaining
+        if len(nodes) > 1:
+            from app.agents.planner.parameter_mapper import parameter_mapper
+            for idx in range(1, len(nodes)):
+                downstream_node = nodes[idx]
+                upstream_node = nodes[idx - 1]
+
+                # Find upstream response_schema
+                upstream_op_name = upstream_node.get("operation")
+                upstream_resp_schema = {}
+                for cat_op in operation_ranker.OPERATION_CATALOG:
+                    if cat_op.get("operation") == upstream_op_name:
+                        upstream_resp_schema = cat_op.get("response_schema", {})
+                        break
+
+                if not upstream_resp_schema and bridge_res and bridge_res.discovered_ops:
+                    for disc_op in bridge_res.discovered_ops:
+                        if disc_op.get("operation") == upstream_op_name or disc_op.get("operation_id") == upstream_op_name:
+                            upstream_resp_schema = disc_op.get("response_schema", {})
+                            break
+
+                # Extract downstream required inputs
+                downstream_op_name = downstream_node.get("operation")
+                downstream_req_params = []
+                downstream_req_schema = {}
+                for cat_op in operation_ranker.OPERATION_CATALOG:
+                    if cat_op.get("operation") == downstream_op_name:
+                        downstream_req_params = list(cat_op.get("query_params", [])) + list(cat_op.get("header_params", []))
+                        if "parameters" in cat_op and isinstance(cat_op["parameters"], dict):
+                            raw_url = cat_op["parameters"].get("url", "")
+                            path_params = re.findall(r"\{([a-zA-Z0-9_]+)\}", raw_url)
+                            downstream_req_params.extend(path_params)
+                            for k, v in cat_op["parameters"].items():
+                                if isinstance(v, str) and "{{" in v and k not in downstream_req_params:
+                                    downstream_req_params.append(k)
+                        downstream_req_schema = cat_op.get("request_schema", {})
+                        break
+
+                if not downstream_req_params and bridge_res and bridge_res.discovered_ops:
+                    for disc_op in bridge_res.discovered_ops:
+                        if disc_op.get("operation") == downstream_op_name or disc_op.get("operation_id") == downstream_op_name:
+                            downstream_req_params = list(disc_op.get("query_params", [])) + list(disc_op.get("header_params", []))
+                            downstream_req_schema = disc_op.get("request_schema", {})
+                            break
+
+                for p_key in downstream_node.get("parameters", {}).keys():
+                    if p_key not in downstream_req_params and p_key not in ["url", "http_method", "method", "is_dynamic_api", "query_params", "header_params", "security_schemes", "security_requirements"]:
+                        downstream_req_params.append(p_key)
+
+                if upstream_resp_schema and downstream_req_params:
+                    mapping_res = parameter_mapper.map_parameters(
+                        upstream_node_id=upstream_node["id"],
+                        upstream_response_schema=upstream_resp_schema,
+                        downstream_required_params=downstream_req_params,
+                        downstream_request_schema=downstream_req_schema,
+                        existing_downstream_params=downstream_node.get("parameters", {})
+                    )
+                    if mapping_res.mappings:
+                        for tgt_p, var_expr in mapping_res.mappings.items():
+                            downstream_node["parameters"][tgt_p] = var_expr
+                            logger.info(f"[AI-37][PHASE_16_MAPPER] Dynamic Parameter Mapped: step={downstream_node['id']} param='{tgt_p}' expr='{var_expr}'")
 
         logger.info(f"[AI-14][DAG] node_count={len(nodes)} edge_count={len(edges)} operations={selected_ops}")
 
@@ -475,6 +643,13 @@ class IntelligentPlannerEngineV4:
             "validation_errors": val_res.errors,
             "validation_warnings": val_res.warnings,
         }
+        if bridge_res and bridge_res.attempted:
+            pipeline_summary["dynamic_discovery"] = {
+                "url": bridge_res.url,
+                "success": bridge_res.success,
+                "provider": bridge_res.provider if bridge_res.success else None,
+                "discovered_ops": bridge_res.discovered_ops_count,
+            }
         logger.info(f"[AI-10][JSON] {_json.dumps(pipeline_summary)}")
 
         return PlanningResultV4(

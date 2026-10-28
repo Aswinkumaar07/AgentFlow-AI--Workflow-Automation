@@ -34,7 +34,9 @@ interface WorkflowState {
   savedVersions: WorkflowVersion[];
   clipboard: Node[];
 
+  databaseWorkflowId?: string | null;
   setWorkflowId: (id: string) => void;
+  setDatabaseWorkflowId: (id: string | null) => void;
   setRestoredNotice: (msg: string | null) => void;
   setNodes: (nodes: Node[] | ((prev: Node[]) => Node[])) => void;
   setEdges: (edges: Edge[] | ((prev: Edge[]) => Edge[])) => void;
@@ -53,8 +55,8 @@ interface WorkflowState {
   pushHistory: () => void;
   undo: () => void;
   redo: () => void;
-  fetchVersions: () => Promise<void>;
-  saveVersion: (name: string, commitMessage?: string, overrideNodes?: Node[], overrideEdges?: Edge[]) => Promise<void>;
+  fetchVersions: (targetWorkflowId?: string) => Promise<void>;
+  saveVersion: (name: string, commitMessage?: string, overrideNodes?: Node[], overrideEdges?: Edge[], targetWorkflowId?: string) => Promise<void>;
   restoreVersion: (versionItem: any) => Promise<void>;
   loadWorkflowFromDefinition: (wf: any) => void;
   loadWorkflowFromBackend: (id: string) => Promise<void>;
@@ -79,8 +81,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   futureStack: [],
   savedVersions: [],
   clipboard: [],
+  databaseWorkflowId: null,
 
   setWorkflowId: (workflowId) => set({ workflowId }),
+  setDatabaseWorkflowId: (databaseWorkflowId) => set({ databaseWorkflowId }),
   setRestoredNotice: (restoredNotice) => set({ restoredNotice }),
 
   setNodes: (updater) =>
@@ -177,15 +181,25 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       console.log(`[AI30-REFRESH] setWorkflow layoutedNodes=${layoutedNodes.length} layoutedEdges=${layoutedEdges.length}`);
       set({
         workflowId: targetWfId,
+        databaseWorkflowId: (workflow as any)?.id || null,
         generatedWorkflow: workflow,
         nodes: layoutedNodes,
         edges: layoutedEdges,
+        currentVersionNumber: 1,
+        savedVersions: [],
+        restoredNotice: null,
       });
+      get().fetchVersions(targetWfId);
     } else {
       set({
         workflowId: targetWfId,
+        databaseWorkflowId: (workflow as any)?.id || null,
         generatedWorkflow: workflow,
+        currentVersionNumber: 1,
+        savedVersions: [],
+        restoredNotice: null,
       });
+      get().fetchVersions(targetWfId);
     }
   },
 
@@ -316,13 +330,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     });
   },
 
-  fetchVersions: async () => {
-    const { workflowId } = get();
+  fetchVersions: async (targetWorkflowId?: string) => {
+    const workflowId = targetWorkflowId || get().workflowId;
     try {
       const list = await workflowApi.getVersions(workflowId);
       const formatted: WorkflowVersion[] = list.map((item: any) => ({
         version_id: item.version_id,
-        workflow_id: item.workflow_id,
+        workflow_id: item.workflow_id || workflowId,
         version_number: item.version_number,
         saved_at: new Date((item.created_at || Date.now() / 1000) * 1000).toISOString(),
         created_at: item.created_at,
@@ -339,11 +353,12 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
   },
 
-  saveVersion: async (name, commitMessage = 'Updated workflow definition', overrideNodes?: Node[], overrideEdges?: Edge[]) => {
-    let { nodes, edges, workflowId, savedVersions, generatedWorkflow } = get();
+  saveVersion: async (name, commitMessage = 'Updated workflow definition', overrideNodes?: Node[], overrideEdges?: Edge[], targetWorkflowId?: string) => {
+    let { nodes, edges, workflowId: currentWfId, savedVersions, generatedWorkflow } = get();
+    const workflowId = targetWorkflowId || currentWfId;
 
     console.log(
-      `[AI-26 DIAGNOSTIC][2. STORE SAVE_VERSION ENTER] initial_nodes=${nodes.length} initial_edges=${edges.length} override_nodes=${overrideNodes?.length ?? 'none'} override_edges=${overrideEdges?.length ?? 'none'}`
+      `[AI-26 DIAGNOSTIC][2. STORE SAVE_VERSION ENTER] workflowId=${workflowId} initial_nodes=${nodes.length} initial_edges=${edges.length} override_nodes=${overrideNodes?.length ?? 'none'} override_edges=${overrideEdges?.length ?? 'none'}`
     );
 
     if (overrideNodes && overrideNodes.length > 0) {
@@ -383,15 +398,20 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           if (s.dependencies) {
             s.dependencies.forEach((depId: string) => {
               edges.push({
-                id: `e_${depId}-${s.step_id || s.id}`,
-                source: depId,
-                target: s.step_id || s.id,
-                animated: true,
+                 id: `e_${depId}-${s.step_id || s.id}`,
+                 source: depId,
+                 target: s.step_id || s.id,
+                 animated: true,
               });
             });
           }
         });
       }
+    }
+
+    // Prevent saving empty snapshots when canvas is empty and no workflow loaded
+    if (nodes.length === 0) {
+      throw new Error('Cannot save empty workflow snapshot. Canvas has 0 nodes.');
     }
 
     const mappedNodes = nodes.map((n: any) => ({
@@ -447,7 +467,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         currentVersionNumber: res.version_number,
         restoredNotice: null,
       });
-    } catch {
+    } catch (err: any) {
+      if (err?.message?.includes('Cannot save empty workflow snapshot')) {
+        throw err;
+      }
       const fallbackVer: WorkflowVersion = {
         version_id: `v${savedVersions.length + 1}.0`,
         version_number: savedVersions.length + 1,
@@ -463,7 +486,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   restoreVersion: async (versionItem: any) => {
-    const { workflowId } = get();
+    const workflowId = versionItem.workflow_id || get().workflowId;
     try {
       const res = await workflowApi.restoreVersion(workflowId, versionItem.version_id || versionItem.version_number);
       const rawNodes = res.nodes || res.workflow_spec?.nodes || res.workflow_spec?.steps || versionItem.nodes || [];
@@ -587,12 +610,19 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
   loadWorkflowFromDefinition: (wf: any) => {
     if (!wf) return;
-    const targetWfId = wf.id || wf.workflow_id || get().workflowId;
+    const def = typeof wf.definition === 'string' ? JSON.parse(wf.definition) : (wf.definition || wf.workflow_spec || wf);
+    // Canonical string workflow ID contract: prioritize definition.workflow_id over database UUID
+    const canonicalId =
+      def?.workflow_id ||
+      wf.workflow_id ||
+      (wf.id && !wf.id.includes('-') ? wf.id : undefined) ||
+      get().workflowId ||
+      'wf_studio_1';
+    const databaseId = wf.id && wf.id.includes('-') ? wf.id : wf.id || null;
     const versionNum = wf.version || wf.version_number || 1;
 
-    const def = wf.definition || wf.workflow_spec || wf;
-    let rawNodes = def.nodes || wf.nodes || def.steps || wf.steps || [];
-    let rawEdges = def.edges || wf.edges || [];
+    let rawNodes = def?.nodes || wf.nodes || def?.steps || wf.steps || [];
+    let rawEdges = def?.edges || wf.edges || [];
 
     const rfNodes: Node[] = rawNodes.map((n: any, idx: number) => {
       const nid = n.id || n.step_id || `step_${idx + 1}`;
@@ -604,7 +634,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       return {
         id: nid,
         type: n.type || 'customNode',
-        position: n.position || { x: 250, y: 50 + idx * 160 },
+        position: n.position && (n.position.x !== 0 || n.position.y !== 0) ? n.position : { x: 250, y: 50 + idx * 160 },
         data: {
           ...(n.data || {}),
           label,
@@ -640,7 +670,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       : { nodes: rfNodes, edges: rfEdges };
 
     set({
-      workflowId: targetWfId,
+      workflowId: canonicalId,
+      databaseWorkflowId: databaseId,
       currentVersionNumber: versionNum,
       nodes: layoutResult.nodes,
       edges: layoutResult.edges,
@@ -654,6 +685,27 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     try {
       const data = await workflowApi.getWorkflowDetails(id);
       if (data) {
+        const currentWfId = get().workflowId;
+        const currentDbWfId = get().databaseWorkflowId;
+        const currentNodes = get().nodes;
+
+        // Guard against late/stale default studio responses:
+        // If current canvas already has nodes for a specific active workflow, don't allow a late default studio response to overwrite it
+        if (
+          id === 'wf_studio_1' &&
+          currentWfId !== 'wf_studio_1' &&
+          currentNodes.length > 0
+        ) {
+          console.warn(`[Hydration Guard] Ignoring stale backend response for "${id}"; active workflow is "${currentWfId}" with ${currentNodes.length} nodes.`);
+          return;
+        }
+
+        const rawNodes = data.definition?.nodes || data.nodes || data.definition?.steps || data.steps || [];
+        if (rawNodes.length === 0 && currentNodes.length > 0 && (currentWfId === id || currentDbWfId === id)) {
+          console.warn(`[Hydration Guard] Ignoring empty response for "${id}"; canvas already has ${currentNodes.length} nodes.`);
+          return;
+        }
+
         get().loadWorkflowFromDefinition(data);
       }
     } catch (e) {

@@ -11,6 +11,7 @@ interface AuthState {
 
 const getInitialUser = (): User | null => {
   try {
+    if (typeof localStorage === 'undefined') return null;
     const raw = localStorage.getItem('agentflow_user');
     if (!raw || raw === 'undefined' || raw === 'null') return null;
     return JSON.parse(raw);
@@ -21,6 +22,7 @@ const getInitialUser = (): User | null => {
 };
 
 const getInitialToken = (): string | null => {
+  if (typeof localStorage === 'undefined') return null;
   const token = localStorage.getItem('agentflow_token');
   if (!token || token === 'undefined' || token === 'null') return null;
   return token;

@@ -10,6 +10,7 @@ class EndpointMetadataModel(BaseModel):
     provider: str = Field(..., description="Target API Provider (e.g., Gmail, Drive, Slack, GitHub, Stripe).")
     version: str = Field(default="v1", description="API version tag.")
     http_method: str = Field(default="GET", description="HTTP Method (GET, POST, PUT, DELETE, PATCH).")
+    base_url: str = Field(default="", description="Base server URL for target API.")
     summary: str = Field(default="", description="Short functional summary.")
     description: str = Field(default="", description="Detailed operation description.")
 
@@ -17,10 +18,14 @@ class EndpointMetadataModel(BaseModel):
     auth_type: str = Field(default="OAuth2", description="Authentication scheme (OAuth2, Bearer, API_Key, BotToken).")
     oauth_scopes: List[str] = Field(default_factory=list, description="Required OAuth2 scopes.")
     permissions: List[str] = Field(default_factory=list, description="Required role permissions.")
+    security_schemes: Dict[str, Any] = Field(default_factory=dict, description="Security scheme definitions.")
+    security_requirements: List[Dict[str, Any]] = Field(default_factory=list, description="Security requirement references.")
 
     # Parameters & Schemas
     required_params: List[str] = Field(default_factory=list, description="Required parameters.")
     optional_params: List[str] = Field(default_factory=list, description="Optional parameters.")
+    query_params: List[str] = Field(default_factory=list, description="Query parameter names.")
+    header_params: List[str] = Field(default_factory=list, description="Header parameter names.")
     examples: Dict[str, Any] = Field(default_factory=dict, description="Request/Response examples.")
     request_schema: Dict[str, Any] = Field(default_factory=dict, description="JSON Schema for request body.")
     response_schema: Dict[str, Any] = Field(default_factory=dict, description="JSON Schema for response body.")

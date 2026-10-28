@@ -5,6 +5,7 @@ import { History, X, Save, RotateCcw, Eye, CheckCircle2 } from 'lucide-react';
 interface VersionHistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
+  workflowId?: string;
   currentNodes?: any[];
   currentEdges?: any[];
 }
@@ -12,10 +13,12 @@ interface VersionHistoryModalProps {
 export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
   isOpen,
   onClose,
+  workflowId,
   currentNodes,
   currentEdges,
 }) => {
   const {
+    workflowId: storeWorkflowId,
     nodes: storeNodes,
     edges: storeEdges,
     savedVersions,
@@ -27,32 +30,49 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
 
   const [versionName, setVersionName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [selectedViewVersion, setSelectedViewVersion] = useState<WorkflowVersion | null>(null);
+
+  const activeWorkflowId = workflowId || storeWorkflowId;
 
   useEffect(() => {
     if (isOpen) {
-      fetchVersions();
+      setSaveError(null);
+      fetchVersions(activeWorkflowId);
     }
-  }, [isOpen, fetchVersions]);
+  }, [isOpen, activeWorkflowId, fetchVersions]);
 
   if (!isOpen) return null;
 
   const targetNodes = currentNodes && currentNodes.length > 0 ? currentNodes : storeNodes;
   const targetEdges = currentEdges && currentEdges.length > 0 ? currentEdges : storeEdges;
+  const isCanvasEmpty = !targetNodes || targetNodes.length === 0;
 
   const handleCreateVersion = async () => {
     if (!versionName.trim() || isSaving) return;
+    if (isCanvasEmpty) {
+      setSaveError('Cannot save empty workflow snapshot. Canvas has 0 nodes.');
+      return;
+    }
     const storeState = useWorkflowStore.getState();
     console.log(
       `[AI-26 DIAGNOSTIC][1. BROWSER SAVE CLICK] target_nodes=${targetNodes.length} target_edges=${targetEdges.length} store_nodes=${storeState.nodes.length} store_edges=${storeState.edges.length}`
     );
     setIsSaving(true);
+    setSaveError(null);
     try {
-      await saveVersion(versionName.trim(), 'Updated workflow definition', targetNodes, targetEdges);
+      await saveVersion(
+        versionName.trim(),
+        'Updated workflow definition',
+        targetNodes,
+        targetEdges,
+        activeWorkflowId
+      );
       setVersionName('');
-      await fetchVersions();
-    } catch (err) {
+      await fetchVersions(activeWorkflowId);
+    } catch (err: any) {
       console.error('[AI-26 DIAGNOSTIC] saveVersion error:', err);
+      setSaveError(err?.message || 'Failed to save version snapshot');
     } finally {
       setIsSaving(false);
     }
@@ -86,21 +106,36 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
         </div>
 
         {/* Save Version Input */}
-        <div className="p-4 border-b border-[rgba(255,255,255,0.10)] bg-[#0E0918]/60 flex gap-2">
-          <input
-            type="text"
-            value={versionName}
-            onChange={(e) => setVersionName(e.target.value)}
-            placeholder="Name new version snapshot (e.g. Version 2 - Added Slack alert)..."
-            className="flex-1 px-3.5 py-2 text-xs bg-[#1B1728] border border-[rgba(255,255,255,0.12)] text-white placeholder-[#7A748E] rounded-xl focus:outline-none focus:border-[#FF6D00]"
-          />
-          <button
-            onClick={handleCreateVersion}
-            disabled={!versionName.trim() || isSaving}
-            className="px-4 py-2 bg-gradient-to-r from-[#FF6D00] to-[#FF0C00] text-white text-xs font-bold rounded-xl hover:opacity-95 transition flex items-center gap-1.5 shadow-[0_0_15px_rgba(255,109,0,0.30)] disabled:opacity-50 disabled:shadow-none cursor-pointer"
-          >
-            <Save className="h-3.5 w-3.5" /> {isSaving ? 'Saving…' : 'Save Version'}
-          </button>
+        <div className="p-4 border-b border-[rgba(255,255,255,0.10)] bg-[#0E0918]/60 space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={versionName}
+              onChange={(e) => {
+                setVersionName(e.target.value);
+                if (saveError) setSaveError(null);
+              }}
+              placeholder="Name new version snapshot (e.g. Version 2 - Added Slack alert)..."
+              className="flex-1 px-3.5 py-2 text-xs bg-[#1B1728] border border-[rgba(255,255,255,0.12)] text-white placeholder-[#7A748E] rounded-xl focus:outline-none focus:border-[#FF6D00]"
+            />
+            <button
+              onClick={handleCreateVersion}
+              disabled={!versionName.trim() || isSaving || isCanvasEmpty}
+              className="px-4 py-2 bg-gradient-to-r from-[#FF6D00] to-[#FF0C00] text-white text-xs font-bold rounded-xl hover:opacity-95 transition flex items-center gap-1.5 shadow-[0_0_15px_rgba(255,109,0,0.30)] disabled:opacity-50 disabled:shadow-none cursor-pointer"
+            >
+              <Save className="h-3.5 w-3.5" /> {isSaving ? 'Saving…' : 'Save Version'}
+            </button>
+          </div>
+
+          {isCanvasEmpty ? (
+            <p className="text-[11px] text-amber-400/90 flex items-center gap-1 font-mono">
+              ⚠️ Cannot save snapshot: Canvas is empty. Add or generate nodes before saving a version.
+            </p>
+          ) : saveError ? (
+            <p className="text-[11px] text-red-400 flex items-center gap-1 font-mono">
+              ⚠️ {saveError}
+            </p>
+          ) : null}
         </div>
 
         {/* Versions List */}

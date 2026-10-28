@@ -1,5 +1,6 @@
 import { apiClient } from './client';
 import type { AIGenerateResponse } from '../types/ai';
+import { unwrapResponse } from './workflows';
 
 export const aiApi = {
   generateWorkflow: async (prompt: string): Promise<AIGenerateResponse> => {
@@ -7,7 +8,7 @@ export const aiApi = {
 
     try {
       const res = await apiClient.post<any>('/ai/generate', { prompt });
-      const payload = res.data?.workflow_json ? res.data : (res.data?.data ?? res.data);
+      const payload = unwrapResponse(res);
 
       if (payload && typeof payload === 'object' && (payload.workflow_json || payload.steps)) {
         const wf = payload.workflow_json || payload;
@@ -18,6 +19,13 @@ export const aiApi = {
           recipient: firstNode.parameters?.to,
           provider: firstNode.provider,
         });
+        const canonId = wf.workflow_id || payload.workflow_id;
+        if (canonId) {
+          payload.workflow_id = canonId;
+          if (payload.workflow_json) {
+            payload.workflow_json.workflow_id = canonId;
+          }
+        }
         return payload as AIGenerateResponse;
       }
     } catch (err: any) {
@@ -119,11 +127,14 @@ export const aiApi = {
       edges = [{ id: 'e1-2', source: 'step_1', target: 'step_2', animated: true }];
     }
 
+    const fallbackId = `wf_gen_${Math.random().toString(36).substring(2, 10)}`;
     return {
       user_prompt: prompt,
       goal: prompt,
       services: ['Gmail'],
+      workflow_id: fallbackId,
       workflow_json: {
+        workflow_id: fallbackId,
         title: prompt,
         nodes,
         edges,

@@ -44,7 +44,7 @@ async def get_workflow_details(
     db: Optional[AsyncSession] = Depends(get_db_session)
 ):
     """Get complete workflow definition and node configuration."""
-    from app.services.workflow_service import parse_workflow_uuid
+    from app.services.workflow_service import parse_workflow_uuid, resolve_canonical_workflow_id
     try:
         wf_uuid = parse_workflow_uuid(workflow_id)
         if current_user and db:
@@ -54,8 +54,9 @@ async def get_workflow_details(
     except Exception:
         pass
 
+    canonical_id = await resolve_canonical_workflow_id(workflow_id, db=db)
     from app.versions.manager import workflow_version_manager
-    history = await workflow_version_manager.get_version_history(workflow_id)
+    history = await workflow_version_manager.get_version_history(canonical_id)
     if history:
         latest = history[0]
         return success_response(data=latest.model_dump(), message="Workflow snapshot retrieved successfully")
@@ -113,20 +114,31 @@ async def execute_workflow_dag(
 # ── Versioning & History Endpoints ──────────────────────────────────────────
 
 @router.get("/{workflow_id}/versions", status_code=status.HTTP_200_OK)
-async def list_workflow_versions(workflow_id: str):
+async def list_workflow_versions(
+    workflow_id: str,
+    db: Optional[AsyncSession] = Depends(get_db_session)
+):
     """List all immutable version snapshots for a given workflow (newest first)."""
     from app.versions.manager import workflow_version_manager
-    history = await workflow_version_manager.get_version_history(workflow_id)
+    from app.services.workflow_service import resolve_canonical_workflow_id
+    canonical_id = await resolve_canonical_workflow_id(workflow_id, db=db)
+    history = await workflow_version_manager.get_version_history(canonical_id)
     return success_response(
         data=[v.model_dump() for v in history],
         message="Workflow version history retrieved successfully"
     )
 
 @router.get("/{workflow_id}/versions/{version_id}", status_code=status.HTTP_200_OK)
-async def get_workflow_version_snapshot(workflow_id: str, version_id: str):
+async def get_workflow_version_snapshot(
+    workflow_id: str,
+    version_id: str,
+    db: Optional[AsyncSession] = Depends(get_db_session)
+):
     """Retrieve details for a specific workflow version snapshot."""
     from app.versions.manager import workflow_version_manager
-    snapshot = await workflow_version_manager.get_version_by_id(workflow_id, version_id)
+    from app.services.workflow_service import resolve_canonical_workflow_id
+    canonical_id = await resolve_canonical_workflow_id(workflow_id, db=db)
+    snapshot = await workflow_version_manager.get_version_by_id(canonical_id, version_id)
     if not snapshot:
         raise HTTPException(status_code=404, detail=f"Version snapshot [{version_id}] not found for workflow [{workflow_id}].")
     return success_response(data=snapshot.model_dump(), message="Workflow version snapshot retrieved successfully")
@@ -140,19 +152,20 @@ async def create_workflow_version_snapshot(
 ):
     """Create a new immutable version snapshot for a workflow and register/update workflow entity in SQL DB."""
     from app.versions.manager import workflow_version_manager
-    from app.services.workflow_service import WorkflowService
+    from app.services.workflow_service import WorkflowService, resolve_canonical_workflow_id
+    canonical_id = await resolve_canonical_workflow_id(workflow_id, db=db)
     spec = req.get("workflow_spec") or req.get("workflow") or req.get("definition") or req
-    name = req.get("name") or req.get("title") or f"Workflow {workflow_id}"
+    name = req.get("name") or req.get("title") or f"Workflow {canonical_id}"
     desc = req.get("description") or ""
     msg = req.get("commit_message") or req.get("message") or "Created version snapshot"
     author = req.get("author") or "admin@agentflow.ai"
 
     nodes_in_spec = spec.get("nodes", []) if isinstance(spec, dict) else []
     edges_in_spec = spec.get("edges", []) if isinstance(spec, dict) else []
-    print(f"[AI-26 DIAGNOSTIC][4. BACKEND ROUTE RECEIVED] workflow_id={workflow_id} spec_nodes={len(nodes_in_spec)} spec_edges={len(edges_in_spec)} req_keys={list(req.keys())}")
+    print(f"[AI-26 DIAGNOSTIC][4. BACKEND ROUTE RECEIVED] workflow_id={workflow_id} canonical_id={canonical_id} spec_nodes={len(nodes_in_spec)} spec_edges={len(edges_in_spec)} req_keys={list(req.keys())}")
 
     snapshot = await workflow_version_manager.create_version_snapshot(
-        workflow_id=workflow_id,
+        workflow_id=canonical_id,
         workflow_spec=spec,
         name=name,
         description=desc,
@@ -182,10 +195,16 @@ async def create_workflow_version_snapshot(
     return success_response(data=snapshot.model_dump(), message="Workflow version snapshot created successfully")
 
 @router.post("/{workflow_id}/versions/{version_id}/restore", status_code=status.HTTP_200_OK)
-async def restore_workflow_version(workflow_id: str, version_id: str):
+async def restore_workflow_version(
+    workflow_id: str,
+    version_id: str,
+    db: Optional[AsyncSession] = Depends(get_db_session)
+):
     """Restores an immutable version definition for loading into builder without modifying historical records."""
     from app.versions.manager import workflow_version_manager
-    snapshot = await workflow_version_manager.rollback_to_version(workflow_id, version_id)
+    from app.services.workflow_service import resolve_canonical_workflow_id
+    canonical_id = await resolve_canonical_workflow_id(workflow_id, db=db)
+    snapshot = await workflow_version_manager.rollback_to_version(canonical_id, version_id)
     if not snapshot:
         raise HTTPException(status_code=404, detail=f"Version [{version_id}] not found for workflow [{workflow_id}].")
     return success_response(data=snapshot.model_dump(), message=f"Version [{version_id}] restored successfully")

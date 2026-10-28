@@ -14,6 +14,49 @@ def parse_workflow_uuid(wf_id_str: str) -> uuid.UUID:
     except Exception:
         return uuid.uuid5(uuid.NAMESPACE_DNS, wf_id_str)
 
+async def resolve_canonical_workflow_id(workflow_id_str: str, db: Optional[AsyncSession] = None) -> str:
+    """Resolves a workflow identifier (which may be a database UUID or string ID) to its canonical storage string ID.
+
+    If given a UUID, queries the workflow definition in the database to extract the underlying
+    workflow_id (e.g. 'wf_studio_1' or 'wf_gen_...'). If not a UUID or if no record is found, returns workflow_id_str.
+    """
+    if not workflow_id_str:
+        return "wf_studio_1"
+
+    # Only attempt database lookup if the string is formatted as a valid UUID
+    try:
+        wf_uuid = uuid.UUID(workflow_id_str)
+    except Exception:
+        return workflow_id_str
+
+    import json
+    if db is not None:
+        try:
+            repo = WorkflowRepository(db)
+            wf = await repo.get_by_id(wf_uuid)
+            if wf and wf.definition:
+                def_data = wf.definition if isinstance(wf.definition, dict) else json.loads(wf.definition or "{}")
+                canon_id = def_data.get("workflow_id")
+                if canon_id and isinstance(canon_id, str):
+                    return canon_id
+        except Exception:
+            pass
+    else:
+        try:
+            from app.database.session import AsyncSessionLocal
+            async with AsyncSessionLocal() as session:
+                repo = WorkflowRepository(session)
+                wf = await repo.get_by_id(wf_uuid)
+                if wf and wf.definition:
+                    def_data = wf.definition if isinstance(wf.definition, dict) else json.loads(wf.definition or "{}")
+                    canon_id = def_data.get("workflow_id")
+                    if canon_id and isinstance(canon_id, str):
+                        return canon_id
+        except Exception:
+            pass
+
+    return workflow_id_str
+
 class WorkflowService:
     def __init__(self, db: AsyncSession):
         self.workflow_repo = WorkflowRepository(db)

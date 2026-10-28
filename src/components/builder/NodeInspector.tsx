@@ -121,11 +121,13 @@ export const NodeInspector: React.FC = () => {
           finalVal = Math.max(1, Math.min(50, Math.floor(value)));
         }
       } else if (typeof value === 'string' && value.trim() !== '') {
-        const parsed = parseInt(value, 10);
-        if (isNaN(parsed)) finalVal = 10;
-        else {
-          if (parsed > 50) console.warn(`[AI-19.3][SAFE_MAXIMUM] original=${parsed} clamped=50`);
-          finalVal = Math.max(1, Math.min(50, parsed));
+        if (!value.includes('{{')) {
+          const parsed = parseInt(value, 10);
+          if (isNaN(parsed)) finalVal = 10;
+          else {
+            if (parsed > 50) console.warn(`[AI-19.3][SAFE_MAXIMUM] original=${parsed} clamped=50`);
+            finalVal = Math.max(1, Math.min(50, parsed));
+          }
         }
       }
     }
@@ -399,6 +401,18 @@ export const NodeInspector: React.FC = () => {
 
     if (type === 'number' || param.name === 'max_results') {
       const isMaxResults = param.name === 'max_results';
+      const isTemplateExpr = typeof rawVal === 'string' && (rawVal.includes('{{') || rawVal.includes('}}'));
+      if (isTemplateExpr) {
+        return (
+          <input
+            type="text"
+            value={val}
+            onChange={(e) => handleParamChange(param.name, e.target.value)}
+            placeholder={param.description || `Enter ${param.display_name}`}
+            className="w-full px-3 py-1.5 bg-[#0E0918] border border-[rgba(255,255,255,0.12)] text-white placeholder-[#7A748E] rounded-xl font-mono text-xs focus:outline-none focus:border-[#FF6D00]"
+          />
+        );
+      }
       return (
         <input
           type="number"
@@ -565,7 +579,7 @@ export const NodeInspector: React.FC = () => {
           </div>
           <div>
             <h3 className="font-bold text-sm text-white">{String(nodeData.label || selectedNode.id)}</h3>
-            <span className="text-[10px] text-[#A098AE] font-mono">{String(provider || 'Step Node')}</span>
+            <span className="text-[10px] text-[#A098AE] font-mono">{String(nodeData.provider_name || provider || 'Step Node')}</span>
           </div>
         </div>
         <div className="flex gap-1.5 items-center">
@@ -837,7 +851,7 @@ export const NodeInspector: React.FC = () => {
                             <Variable className="h-3 w-3" /> Variable
                           </button>
                         </div>
-                        {isMaxResults ? (
+                        {isMaxResults && !String(value ?? '').includes('{{') ? (
                           <input
                             type="number"
                             min={1}

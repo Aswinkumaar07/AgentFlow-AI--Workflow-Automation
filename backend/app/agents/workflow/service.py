@@ -38,12 +38,14 @@ class WorkflowGeneratorAgent(BaseWorkflowGeneratorService):
                     "data": {
                         "label": n.get("label", n.get("id")),
                         "provider": n.get("provider", "Generic"),
+                        "provider_name": n.get("provider_name"),
                         "operation_id": op_id,
                         "parameters": params,
                         "step_id": n.get("id", f"step_{idx+1}"),
                     },
                     "parameters": params,
                     "provider": n.get("provider", "Generic"),
+                    "provider_name": n.get("provider_name"),
                     "operation": op_id,
                 })
 

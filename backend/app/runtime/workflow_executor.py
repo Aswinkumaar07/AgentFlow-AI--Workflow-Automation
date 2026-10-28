@@ -173,22 +173,15 @@ class WorkflowRuntimeExecutorV3:
         self._control_signals[execution_id] = "RUNNING"
 
         # ── Preflight Connection Safety Guard ─────────────────────────────────
-        from app.services.connection_readiness import check_workflow_readiness, is_internal_provider
-        req_providers = set()
-        for step in steps:
-            prov = str(step.get("provider") or "").strip()
-            if prov and not is_internal_provider(prov):
-                req_providers.add(prov)
-
-        if req_providers:
-            readiness = await check_workflow_readiness(list(req_providers), user_id=tenant_id)
-            if not readiness["ready"]:
-                missing_str = ", ".join(readiness["missing_connections"])
-                logger.warning(f"[PREFLIGHT_BLOCKED] Execution [{execution_id}] blocked due to missing connection(s): {missing_str}")
-                state.status = "BLOCKED_MISSING_CONNECTION"
-                state.end_time = time.time()
-                await self.history_store.save_state(state)
-                return state
+        from app.services.connection_readiness import check_step_readiness
+        readiness = await check_step_readiness(steps, user_id=tenant_id)
+        if not readiness["ready"]:
+            missing_str = ", ".join(readiness["missing_connections"])
+            logger.warning(f"[PREFLIGHT_BLOCKED] Execution [{execution_id}] blocked due to missing connection(s): {missing_str}")
+            state.status = "BLOCKED_MISSING_CONNECTION"
+            state.end_time = time.time()
+            await self.history_store.save_state(state)
+            return state
 
         logger.info(f"[AI-16][WORKFLOW_EXECUTE_START] {json.dumps({'execution_id': execution_id, 'workflow_id': state.workflow_id, 'node_id': 'ALL', 'operation': 'workflow.execute', 'status': 'STARTED'})}")
         logger.info(f"[AI-16][DAG_RECEIVED] {json.dumps({'execution_id': execution_id, 'workflow_id': state.workflow_id, 'node_id': 'ALL', 'operation': 'dag.validate', 'status': 'VALIDATED', 'node_count': len(steps)})}")

@@ -23,11 +23,16 @@ class ExecutionContext(BaseModel):
     ) -> Dict[str, Any]:
         """Constructs standardized node input payload and interpolates template parameters."""
         var_store = VariableStore(self.context_data)
+        user_email = "aswinkumaar07@gmail.com"
+        if isinstance(self.context_data, dict) and self.context_data.get("user_email"):
+            user_email = self.context_data.get("user_email")
+
         scope = {
             "context": self.context_data,
             "previous_outputs": self.previous_outputs,
             "secrets": self.secrets,
             "metadata": self.metadata,
+            "user": {"email": user_email, "name": "Aswin"},
         }
         # Add shortcuts like step_1 -> previous_outputs["step_1"]
         for step_id, out_val in self.previous_outputs.items():

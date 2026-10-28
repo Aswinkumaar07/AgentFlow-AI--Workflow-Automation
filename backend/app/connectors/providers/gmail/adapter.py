@@ -419,6 +419,9 @@ class GmailAdapter(BaseProviderAdapter):
                 bcc_addr = params.get("bcc")
                 from_addr = params.get("from") or profile_email or account_label or ""
 
+                if not to_addr or to_addr in ("{{user.email}}", "me") or to_addr.startswith("{{"):
+                    to_addr = from_addr or profile_email or account_label or "aswinkumaar07@gmail.com"
+
                 # ── Sprint AUTH-13 Task 5: Runtime Verification ─────────────────
                 logger.info("[AUTH-13] Runtime Gmail Parameters")
                 logger.info({
@@ -633,11 +636,39 @@ class GmailAdapter(BaseProviderAdapter):
             elif op_id in ["gmail.messages.reply", "gmail.reply"]:
                 msg_id = str(params.get("message_id") or params.get("id") or "").strip()
                 thread_id = str(params.get("thread_id") or params.get("threadId") or msg_id).strip()
-                to_addr = str(params.get("to") or "").strip()
-                subject = str(params.get("subject") or "Re: Message").strip()
-                body_text = str(params.get("body") or "").strip()
-                if not subject.startswith("Re:"):
+                to_addr = str(params.get("to") or params.get("recipient") or "").strip()
+                subject = str(params.get("subject") or "").strip()
+                body_text = str(params.get("body") or params.get("message") or "").strip()
+
+                if (not to_addr or to_addr.startswith("{{")) and msg_id:
+                    try:
+                        orig_res = await client.get(
+                            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}",
+                            headers=headers,
+                            params={"format": "metadata", "metadataHeaders": ["From", "Reply-To", "Subject"]}
+                        )
+                        if orig_res.is_success:
+                            orig_json = orig_res.json()
+                            orig_headers = orig_json.get("payload", {}).get("headers", [])
+                            from_h = next((h.get("value") for h in orig_headers if h.get("name", "").lower() in ("reply-to", "from")), "")
+                            subj_h = next((h.get("value") for h in orig_headers if h.get("name", "").lower() == "subject"), "")
+                            if from_h:
+                                import email.utils
+                                _, parsed_email = email.utils.parseaddr(from_h)
+                                to_addr = parsed_email or from_h
+                            if subj_h and not subject:
+                                subject = f"Re: {subj_h}" if not subj_h.lower().startswith("re:") else subj_h
+                    except Exception as orig_exc:
+                        logger.warning(f"Failed fetching original message {msg_id} metadata: {orig_exc}")
+
+                if not to_addr or to_addr in ("{{user.email}}", "me") or to_addr.startswith("{{"):
+                    to_addr = profile_email or account_label or "aswinkumaar07@gmail.com"
+
+                if not subject:
+                    subject = "Re: Message"
+                elif not subject.lower().startswith("re:"):
                     subject = f"Re: {subject}"
+
                 url = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
                 raw_encoded = self._build_mime_message(to_addr=to_addr, subject=subject, body=body_text, from_addr=profile_email)
                 payload = {"raw": raw_encoded}

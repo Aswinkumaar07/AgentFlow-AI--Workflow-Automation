@@ -70,6 +70,16 @@ export const WorkflowsPage: React.FC = () => {
     refetchInterval: 15000,
   });
 
+  React.useEffect(() => {
+    const handleWorkflowCreated = () => {
+      refetch();
+    };
+    window.addEventListener('workflow-created', handleWorkflowCreated);
+    return () => {
+      window.removeEventListener('workflow-created', handleWorkflowCreated);
+    };
+  }, [refetch]);
+
   const workflows = data?.items || [];
   const totalCount = data?.total ?? workflows.length;
 
@@ -121,7 +131,7 @@ export const WorkflowsPage: React.FC = () => {
   const handleOpenBuilder = (item?: WorkflowItem) => {
     if (item) {
       useWorkflowStore.getState().loadWorkflowFromDefinition(item);
-      const targetId = item.id;
+      const targetId = item.definition?.workflow_id || item.id;
       navigate(`/builder?id=${encodeURIComponent(targetId)}`);
     } else {
       navigate('/builder');
@@ -435,7 +445,7 @@ export const WorkflowsPage: React.FC = () => {
                       </button>
 
                       <button
-                        onClick={() => setActiveModal({ type: 'version', workflowId: item.id })}
+                        onClick={() => setActiveModal({ type: 'version', workflowId: item.definition?.workflow_id || item.id })}
                         className="p-2 rounded-xl bg-[#1B1728] hover:bg-[#231E3A] border border-[rgba(255,255,255,0.10)] text-[#A098AE] hover:text-white transition cursor-pointer"
                         title="Version History"
                       >
@@ -536,6 +546,7 @@ export const WorkflowsPage: React.FC = () => {
       {/* ── MODALS INTEGRATION ─────────────────────────────────────────── */}
       <VersionHistoryModal
         isOpen={activeModal.type === 'version'}
+        workflowId={activeModal.workflowId}
         onClose={() => setActiveModal({ type: null })}
       />
       <ExecutionHistoryModal

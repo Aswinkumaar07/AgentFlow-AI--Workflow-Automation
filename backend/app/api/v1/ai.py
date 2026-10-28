@@ -125,28 +125,30 @@ async def generate_workflow(
         except Exception as bridge_err:
             logger.warning(f"[AI] Workflow registration bridge warning: {bridge_err}")
 
+    # ── Ensure generated workflow has an immutable version snapshot persisted on disk ──
+    from app.versions.manager import workflow_version_manager
+    wf_id = wf_json.get("workflow_id") if isinstance(wf_json, dict) else "wf_studio_1"
+    version_id = None
+    version_number = None
+
+    try:
+        ver = await workflow_version_manager.create_version_snapshot(
+            workflow_id=wf_id,
+            workflow_spec=wf_json,
+            name=state.get("goal") or (req.prompt[:50] if req.prompt else "Generated Workflow"),
+            commit_message=f"Initial generation: {req.prompt[:40] if req.prompt else 'Generated workflow'}",
+            author=user_id if user_id else "admin@agentflow.ai"
+        )
+        version_id = ver.version_id
+        version_number = ver.version_number
+    except Exception as ver_err:
+        logger.warning(f"[AI] Failed creating initial version snapshot for generated workflow: {ver_err}")
+
     # ── AI-30 Natural Language Schedule Intent Detection & Auto-Pinning ──
     schedule_dict = None
     from app.services.workflow_scheduler import workflow_scheduler_service
-    from app.versions.manager import workflow_version_manager
 
     if workflow_scheduler_service.has_scheduling_intent(req.prompt):
-        wf_id = wf_json.get("workflow_id") if isinstance(wf_json, dict) else "wf_studio_1"
-
-        try:
-            ver = await workflow_version_manager.create_version_snapshot(
-                workflow_id=wf_id,
-                workflow_spec=wf_json,
-                author=user_id,
-                commit_message=f"Auto-pinned schedule generation: {req.prompt[:40]}"
-            )
-            version_id = ver.version_id
-            version_number = ver.version_number
-        except Exception as ver_err:
-            logger.warning(f"[AI-30][VERSION_PINNING_WARN] Failed creating version snapshot: {ver_err}")
-            version_id = None
-            version_number = None
-
         job = workflow_scheduler_service.schedule_or_update_job(
             prompt=req.prompt,
             workflow_json=wf_json,

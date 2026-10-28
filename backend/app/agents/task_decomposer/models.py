@@ -6,6 +6,7 @@ class DecomposedTask(BaseModel):
     step: int = Field(description="1-indexed execution step order")
     name: str = Field(description="Human readable title of the atomic task")
     provider: str = Field(description="Target provider e.g. gmail, drive, slack, github, schedule, ai")
+    provider_name: Optional[str] = Field(default=None, description="Human readable or dynamic provider identity e.g. Swagger Petstore - OpenAPI 3.0")
     operation: str = Field(description="Target operation ID e.g. gmail.messages.send, gmail.messages.list, ai.email_writer")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Task parameters or dependency references")
     depends_on: List[int] = Field(default_factory=list, description="Step indices this task depends on")

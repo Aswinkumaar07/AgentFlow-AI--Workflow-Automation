@@ -68,6 +68,9 @@ class SlackAdapter(BaseProviderAdapter):
         page_num = 1
         found_id = None
 
+        first_member_channel_id = None
+        first_public_channel_id = None
+
         while True:
             params = {"types": "public_channel", "limit": 200}
             if cursor:
@@ -96,6 +99,11 @@ class SlackAdapter(BaseProviderAdapter):
                         c_memb = item.get("is_member", False)
                         c_arch = item.get("is_archived", False)
 
+                        if c_memb and not c_arch and not first_member_channel_id:
+                            first_member_channel_id = c_id
+                        if not c_arch and not first_public_channel_id:
+                            first_public_channel_id = c_id
+
                         if c_name.lower() == clean_name:
                             found_id = c_id
                             logger.info(
@@ -122,6 +130,18 @@ class SlackAdapter(BaseProviderAdapter):
 
         if found_id:
             return found_id
+        elif clean_name in ("general", "") and first_member_channel_id:
+            logger.info(
+                f"[SLACK_CHANNEL_FALLBACK] Default channel '{clean_name}' not found. "
+                f"Falling back to active workspace member channel ID {first_member_channel_id}."
+            )
+            return first_member_channel_id
+        elif clean_name in ("general", "") and first_public_channel_id:
+            logger.info(
+                f"[SLACK_CHANNEL_FALLBACK] Default channel '{clean_name}' not found. "
+                f"Falling back to available public channel ID {first_public_channel_id}."
+            )
+            return first_public_channel_id
         else:
             logger.warning(f"[SLACK_CHANNEL_NOT_FOUND] Target channel '{clean_name}' not found across pages.")
             raise ValueError(f"Slack channel not found: {clean_name}")

@@ -19,6 +19,7 @@ export interface ExtractedEmailDetails {
   messageId: string;
   threadId: string;
   sender: string;
+  recipient?: string;
   subject: string;
   date: string;
   content: string;
@@ -272,14 +273,32 @@ export function extractGmailMessageDetails(inputData: any): ExtractedEmailDetail
     };
   }
 
-  // If passed an entire workflow execution result object with node_results
+  // Preserve references to raw input and step before unwrapping
+  let targetStep = inputData;
   if (Array.isArray(msg.node_results) && msg.node_results.length > 0) {
     const getStep = msg.node_results.slice().reverse().find((r: any) =>
       r.operation === 'gmail.messages.get' || r.operation === 'gmail.get' || r.output?.body?.payload || r.output?.response?.payload
     );
-    const targetStep = getStep || msg.node_results[msg.node_results.length - 1];
+    targetStep = getStep || msg.node_results[msg.node_results.length - 1];
     msg = targetStep.output || targetStep;
   }
+
+  // Extract request payload if present (e.g. for gmail.messages.send or parameters)
+  const reqPayload =
+    targetStep?.output?.request?.payload ||
+    targetStep?.request?.payload ||
+    targetStep?.parameters ||
+    targetStep?.output?.parameters ||
+    targetStep?.output?.payload ||
+    targetStep?.payload ||
+    inputData?.output?.request?.payload ||
+    inputData?.request?.payload ||
+    inputData?.parameters ||
+    inputData?.output?.parameters ||
+    msg?.output?.request?.payload ||
+    msg?.request?.payload ||
+    msg?.parameters ||
+    null;
 
   // Unwrap common nested response shapes
   if (msg.output) msg = msg.output;
@@ -306,6 +325,33 @@ export function extractGmailMessageDetails(inputData: any): ExtractedEmailDetail
       if (nameLower === 'subject' && !subject) subject = String(h.value || '');
       if (nameLower === 'date' && !date) date = String(h.value || '');
     }
+  }
+
+  // Extract request-level values for send operations (to, subject, body)
+  const rawTo = reqPayload?.to ?? reqPayload?.recipient;
+  const reqTo = Array.isArray(rawTo)
+    ? rawTo.join(', ')
+    : rawTo
+    ? String(rawTo)
+    : '';
+  const reqSubject = reqPayload?.subject ? String(reqPayload.subject) : '';
+  const reqBody = reqPayload?.body
+    ? String(reqPayload.body)
+    : reqPayload?.text
+    ? String(reqPayload.text)
+    : reqPayload?.content
+    ? String(reqPayload.content)
+    : '';
+
+  // Fallback for sender & recipient from request payload if not in headers
+  const recipient = reqTo || undefined;
+  if (!sender && reqTo) {
+    sender = reqTo;
+  }
+
+  // Fallback for subject from request payload if not in headers
+  if (!subject && reqSubject) {
+    subject = reqSubject;
   }
 
   // Fallback for Date if missing from headers
@@ -388,6 +434,11 @@ export function extractGmailMessageDetails(inputData: any): ExtractedEmailDetail
     content = `[Inline Image Content: ${names}]`;
   }
 
+  // Fallback for Body Content from request payload for send operations
+  if ((!content || content === 'No message content available.') && reqBody) {
+    content = reqBody;
+  }
+
   if (!content) {
     content = 'No message content available.';
   }
@@ -398,6 +449,7 @@ export function extractGmailMessageDetails(inputData: any): ExtractedEmailDetail
     messageId: messageId || '—',
     threadId: threadId || '—',
     sender: sender || 'Unknown Sender',
+    recipient: recipient,
     subject: subject || '(No Subject)',
     date: date || '—',
     content: content,

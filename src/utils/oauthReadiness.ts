@@ -53,17 +53,125 @@ export function isGoogleService(provider: string): boolean {
   return GOOGLE_VARIANTS.has(norm) || norm.includes('google') || norm.includes('gmail') || norm.includes('drive') || norm.includes('sheets');
 }
 
-export function checkProviderReadiness(
-  requiredProviders: string[],
+export function isDynamicOpenAPIOperation(nodeOrData: any): boolean {
+  if (!nodeOrData) return false;
+  const data = typeof nodeOrData === 'object' && nodeOrData.data ? nodeOrData.data : nodeOrData;
+  const params = (data && data.parameters) || (typeof nodeOrData === 'object' && nodeOrData.parameters) || {};
+
+  const isDynamic = Boolean(
+    data?.is_dynamic_api ||
+    params?.is_dynamic_api ||
+    data?.provider === 'generic_rest' ||
+    params?.provider === 'generic_rest' ||
+    (typeof data?.provider === 'string' && data.provider.toLowerCase().includes('openapi')) ||
+    (typeof params?.provider === 'string' && params.provider.toLowerCase().includes('openapi'))
+  );
+
+  return isDynamic;
+}
+
+export function isDynamicPublicOpenAPIOperation(nodeOrData: any): boolean {
+  if (!isDynamicOpenAPIOperation(nodeOrData)) return false;
+
+  const data = typeof nodeOrData === 'object' && nodeOrData.data ? nodeOrData.data : nodeOrData;
+  const params = (data && data.parameters) || (typeof nodeOrData === 'object' && nodeOrData.parameters) || {};
+
+  const secSchemes = data?.security_schemes || params?.security_schemes || {};
+  const secReqs = data?.security_requirements || params?.security_requirements || [];
+
+  const hasSecSchemes = typeof secSchemes === 'object' && secSchemes !== null && Object.keys(secSchemes).length > 0;
+  const hasSecReqs = Array.isArray(secReqs) && secReqs.length > 0;
+
+  return !hasSecSchemes && !hasSecReqs;
+}
+
+export function checkNodeReadiness(
+  nodes: any[],
   connections: OAuthConnection[] = []
 ): WorkflowReadinessResult {
   const missing_connections: string[] = [];
   const provider_results: ProviderReadinessResult[] = [];
 
-  const activeConnections = connections.filter((c) => c.status === 'CONNECTED');
+  const activeConnections = connections.filter((c) => c && (c.status === 'CONNECTED' || (c as any).is_connected === true));
 
-  for (const rawProv of requiredProviders) {
-    if (!rawProv) continue;
+  for (const node of nodes) {
+    if (!node) continue;
+    const data = node.data || node;
+    const provider = data.provider || node.provider || '';
+    if (!provider) continue;
+
+    const norm = provider.toLowerCase().trim();
+
+    // Internal providers (AI, Condition, Loop, Merge, Schedule, Approval, Webhook, etc.)
+    if (isInternalProvider(norm)) {
+      provider_results.push({
+        provider,
+        status: 'INTERNAL_PROVIDER',
+        requires_oauth: false,
+      });
+      continue;
+    }
+
+    // Dynamic OpenAPI operations (is_dynamic_api = true or generic_rest)
+    if (isDynamicOpenAPIOperation(node)) {
+      // Dynamic OpenAPI operations (public or authenticated) are handled by backend runtime/GenericRESTAdapter, not native OAuth store
+      provider_results.push({
+        provider,
+        status: 'READY',
+        requires_oauth: false,
+      });
+      continue;
+    }
+
+    // Native OAuth Connectors (Gmail, Slack, Drive, Sheets, GitHub, Stripe, Notion, etc.)
+    const isConnected = activeConnections.some((c) => {
+      if (!c || !c.provider) return false;
+      const cNorm = c.provider.toLowerCase().trim();
+      if (cNorm === norm) return true;
+      if (isGoogleService(norm) && isGoogleService(cNorm)) return true;
+      return norm.includes(cNorm) || cNorm.includes(norm);
+    });
+
+    if (isConnected) {
+      provider_results.push({
+        provider,
+        status: 'READY',
+        requires_oauth: true,
+      });
+    } else {
+      if (!missing_connections.includes(provider)) {
+        missing_connections.push(provider);
+      }
+      provider_results.push({
+        provider,
+        status: 'MISSING_CONNECTION',
+        requires_oauth: true,
+      });
+    }
+  }
+
+  return {
+    ready: missing_connections.length === 0,
+    missing_connections,
+    provider_results,
+  };
+}
+
+export function checkProviderReadiness(
+  requiredProvidersOrNodes: (string | any)[],
+  connections: OAuthConnection[] = []
+): WorkflowReadinessResult {
+  if (Array.isArray(requiredProvidersOrNodes) && requiredProvidersOrNodes.length > 0 && typeof requiredProvidersOrNodes[0] === 'object') {
+    return checkNodeReadiness(requiredProvidersOrNodes, connections);
+  }
+
+  const missing_connections: string[] = [];
+  const provider_results: ProviderReadinessResult[] = [];
+
+  const activeConnections = connections.filter((c) => c && (c.status === 'CONNECTED' || (c as any).is_connected === true));
+
+  for (const rawProv of requiredProvidersOrNodes) {
+    if (!rawProv || typeof rawProv !== 'string') continue;
     const norm = rawProv.toLowerCase().trim();
 
     if (isInternalProvider(norm)) {
@@ -75,8 +183,18 @@ export function checkProviderReadiness(
       continue;
     }
 
+    if (norm === 'generic_rest' || norm.includes('openapi')) {
+      provider_results.push({
+        provider: rawProv,
+        status: 'READY',
+        requires_oauth: false,
+      });
+      continue;
+    }
+
     const isConnected = activeConnections.some((c) => {
-      const cNorm = c.provider.toLowerCase();
+      if (!c || !c.provider) return false;
+      const cNorm = c.provider.toLowerCase().trim();
       if (cNorm === norm) return true;
       if (isGoogleService(norm) && isGoogleService(cNorm)) return true;
       return norm.includes(cNorm) || cNorm.includes(norm);
@@ -136,8 +254,8 @@ export function rebindNodesWithOAuthConnections(
 
     const provider = node.data?.provider || node.provider || '';
 
-    // Requirement D: Internal providers (AI, condition, loop, schedule, approval, etc.) are never OAuth-bound
-    if (!provider || isInternalProvider(provider)) {
+    // Requirement D: Internal providers & dynamic OpenAPI operations are never OAuth-bound
+    if (!provider || isInternalProvider(provider) || isDynamicOpenAPIOperation(node)) {
       return node;
     }
 
